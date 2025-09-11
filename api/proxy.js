@@ -13,13 +13,16 @@ export default async function handler(req, res) {
       }
     });
 
-    // Copy headers, but remove security ones
+    // Copy headers, but clean security ones
     const headers = {};
     response.headers.forEach((value, key) => {
       if (!["x-frame-options", "content-security-policy"].includes(key.toLowerCase())) {
         headers[key] = value;
       }
     });
+
+    // Force text/html for iframe rendering
+    headers["content-type"] = "text/html; charset=utf-8";
 
     res.writeHead(response.status, headers);
     response.body.pipe(res);
