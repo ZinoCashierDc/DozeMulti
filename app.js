@@ -60,8 +60,7 @@ function createIframeForSpace(s){
   // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   // Use proxy if set
-  iframe.src = PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url;
-
+  iframe.src = `doze-multi.vercel.app/api/proxy?url=${encodeURIComponent(site.url)}`;
   // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
