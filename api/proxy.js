@@ -1,36 +1,39 @@
+// api/proxy.js
 export default async function handler(req, res) {
   const { url } = req.query;
-
   if (!url) {
-    res.status(400).send("Missing url parameter");
-    return;
+    return res.status(400).send("Missing url parameter");
   }
 
   try {
     const response = await fetch(url, {
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0",
-    "Accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-  },
-});
+      headers: {
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
+      },
+    });
 
-    const html = await response.text();
+    // Copy response body as buffer
+    const body = await response.arrayBuffer();
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.status(200).send(html);
+    // Clone headers, but strip X-Frame-Options & CSP
+    const headers = {};
+    response.headers.forEach((value, key) => {
+      if (
+        !["x-frame-options", "content-security-policy", "content-security-policy-report-only"].includes(
+          key.toLowerCase()
+        )
+      ) {
+        headers[key] = value;
+      }
+    });
+
+    // Always allow embedding
+    headers["X-Frame-Options"] = "ALLOWALL";
+
+    res.writeHead(response.status, headers);
+    res.end(Buffer.from(body));
   } catch (err) {
-    res.status(500).send("Proxy error: " + err.message);
+    console.error("Proxy error:", err);
+    res.status(500).send("Proxy error");
   }
 }
-
-// inside your proxy
-res.setHeader("X-Frame-Options", ""); 
-res.setHeader("Content-Security-Policy", "");
