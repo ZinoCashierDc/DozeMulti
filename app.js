@@ -46,7 +46,6 @@ function baseTitleFromUrl(url){
   }
 }
 
-// count same base type number to append #n
 function countSameTitle(baseTitle){
   return spaces.filter(s => (s.baseTitle === baseTitle)).length;
 }
@@ -57,18 +56,15 @@ function createIframeForSpace(s){
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
-  // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-
-  // ✅ Fixed: use s.url instead of site.url
+  
+  // ✅ FIX: use s.url instead of site.url
   iframe.src = PROXY_BASE + encodeURIComponent(s.url);
 
-  // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
   frames.set(s.id, iframe);
 
-  // show/hide notice on load
   iframe.addEventListener('load', () => {
     if (iframe.style.display !== 'none') {
       notice.style.display = 'none';
@@ -186,11 +182,7 @@ function showActiveFrame(id){
   let iframe = createIframeForSpace(s);
 
   frames.forEach((f, key) => {
-    if (key === id) {
-      f.style.display = 'block';
-    } else {
-      f.style.display = 'none';
-    }
+    f.style.display = key === id ? 'block' : 'none';
   });
 
   let loaded = false;
@@ -201,7 +193,7 @@ function showActiveFrame(id){
   setTimeout(() => {
     if (!loaded) {
       notice.style.display = 'block';
-      notice.textContent = 'Content may be blocked from embedding (X-Frame-Options/CSP). Try "Open" to open in a new tab.';
+      notice.textContent = 'Content may be blocked from embedding. Try "Open" to open in a new tab.';
     }
   }, 4000);
 }
@@ -211,7 +203,7 @@ function escapeHtml(text) {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* Add handlers for modal & adding spaces */
+/* Modal & add spaces */
 plusBtn.onclick = () => addModal.classList.remove('hidden');
 closeModal.onclick = () => addModal.classList.add('hidden');
 addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.classList.add('hidden'); });
@@ -252,7 +244,7 @@ function addNewSpace(url, title){
   renderAll();
 }
 
-/* other buttons */
+/* Buttons */
 newBlankBtn.onclick = () => {
   const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
   spaces.unshift(s);
@@ -279,5 +271,4 @@ openFrameBtn.onclick = () => {
   if (s) window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank', 'noopener');
 };
 
-/* initial render */
 renderAll();
