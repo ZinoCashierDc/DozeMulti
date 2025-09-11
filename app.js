@@ -59,8 +59,10 @@ function createIframeForSpace(s){
   iframe.id = 'frame_' + s.id;
   // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-  // Use proxy if set
-  iframe.src = PROXY_BASE + encodeURIComponent(site.url);
+
+  // ✅ Fixed: use s.url instead of site.url
+  iframe.src = PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url;
+
   // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
@@ -68,13 +70,11 @@ function createIframeForSpace(s){
 
   // show/hide notice on load
   iframe.addEventListener('load', () => {
-    // If iframe loaded, hide notice
     if (iframe.style.display !== 'none') {
       notice.style.display = 'none';
     }
   });
 
-  // If there is an error (rarely fires), show an inline notice for the frame
   iframe.addEventListener('error', () => {
     console.warn('iframe error for', s.url);
   });
@@ -107,7 +107,6 @@ function renderList(){
     `;
     el.querySelector('.openBtn').onclick = () => activateSpace(s.id);
     el.querySelector('.delBtn').onclick = () => {
-      // remove iframe element if present
       const ifr = frames.get(s.id);
       if (ifr) {
         try { ifr.remove(); } catch(e) {}
@@ -119,7 +118,6 @@ function renderList(){
       renderAll();
     };
     el.onclick = (e) => {
-      // Clicking the item (not the buttons) will open/activate
       if (e.target.closest('.openBtn') || e.target.closest('.delBtn')) return;
       activateSpace(s.id);
     };
@@ -144,7 +142,6 @@ function buildTabs(){
     close.innerHTML = `<svg viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M18 6L6 18M6 6l12 12"/></svg>`;
     close.onclick = (ev) => {
       ev.stopPropagation();
-      // delete
       const ifr = frames.get(s.id);
       if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
       spaces = spaces.filter(x => x.id !== s.id);
@@ -186,10 +183,8 @@ function showActiveFrame(id){
   }
   notice.style.display = 'none';
 
-  // Ensure iframe exists
   let iframe = createIframeForSpace(s);
 
-  // Hide all iframes then show the requested one
   frames.forEach((f, key) => {
     if (key === id) {
       f.style.display = 'block';
@@ -198,14 +193,11 @@ function showActiveFrame(id){
     }
   });
 
-  // If iframe hasn't started load, show a small loading notice
-  // We'll set a timeout to show "embed blocked" if onload doesn't fire
   let loaded = false;
   const loadHandler = () => { loaded = true; notice.style.display = 'none'; iframe.removeEventListener('load', loadHandler); };
   iframe.addEventListener('load', loadHandler);
   notice.style.display = 'block';
   notice.textContent = 'Loading space...';
-  // after 5s, if not loaded show a helpful message
   setTimeout(() => {
     if (!loaded) {
       notice.style.display = 'block';
@@ -226,12 +218,10 @@ addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.
 
 addFacebook.onclick = () => {
   addModal.classList.add('hidden');
-  // Facebook "web"
   addNewSpace('https://www.facebook.com', 'Facebook');
 };
 addFacebookLite.onclick = () => {
   addModal.classList.add('hidden');
-  // mbasic is a simpler mobile/basic interface that is less likely to deep-link to app
   addNewSpace('https://mbasic.facebook.com', 'Facebook Lite');
 };
 
@@ -255,9 +245,7 @@ function addNewSpace(url, title){
   const sameCount = countSameTitle(baseTitle);
   const number = sameCount + 1;
   const s = { id: uid(), url: url, title: title || baseTitle, baseTitle, number };
-  // insert to beginning
   spaces.unshift(s);
-  // create iframe now but hidden
   createIframeForSpace(s);
   activeId = s.id;
   save();
@@ -281,7 +269,6 @@ reloadFrameBtn.onclick = () => {
     try {
       iframe.contentWindow.location.reload();
     } catch(e) {
-      // cross-origin reload
       iframe.src = iframe.src;
     }
   }
