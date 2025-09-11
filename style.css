@@ -1,0 +1,126 @@
+body {
+  margin: 0;
+  font-family: Inter, sans-serif;
+  background: linear-gradient(180deg,#071127,#081426);
+  color: #e6eef8;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100vh;
+}
+
+.sidebar {
+  background: rgba(255,255,255,0.03);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.logo {
+  width: 42px; height: 42px;
+  background: linear-gradient(135deg,#22c55e,#06b6d4);
+  display: grid; place-items: center;
+  font-weight: bold; border-radius: 10px;
+  color: #041022;
+}
+
+.title { font-weight: bold; }
+.muted { font-size: 12px; color: #94a3b8; }
+
+.controls { margin: 12px 0; }
+.btn {
+  background: #0b1220;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.space-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.space-item {
+  background: rgba(255,255,255,0.04);
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.space-item.active { background: #22c55e; color: #041022; }
+
+.main {
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+}
+.tab {
+  background: rgba(255,255,255,0.05);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tab.active {
+  background: linear-gradient(90deg,#0ea5a8,#2563eb);
+  color: #fff;
+  font-weight: bold;
+}
+
+.frame-wrap {
+  flex: 1;
+  margin: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #050816;
+  position: relative;
+}
+.frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+.notice {
+  color: #94a3b8;
+  padding: 20px;
+}
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-content {
+  background: #0b1220;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+}
+.choice, .close {
+  display: block;
+  margin: 10px auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+.choice { background: #22c55e; color: #041022; }
+.close { background: transparent; color: #94a3b8; }

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DozaMulti — Multi-Space Dashboard</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="header">
+        <div class="logo">DM</div>
+        <div>
+          <div class="title">DozaMulti</div>
+          <div class="muted">Multi-space web browser</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="addBtn" class="btn">+</button>
+      </div>
+
+      <div class="space-list" id="spaceList"></div>
+    </div>
+
+    <div class="main">
+      <div class="tabs" id="tabs"></div>
+      <div class="frame-wrap" id="frameWrap">
+        <div id="notice" class="notice">
+          No space selected — press <b>+</b> to add one.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for choosing space -->
+  <div id="chooseModal" class="modal">
+    <div class="modal-content">
+      <h2>Choose a space</h2>
+      <button class="choice" data-url="https://www.facebook.com/" data-title="Facebook">Facebook</button>
+      <button class="choice" data-url="https://mbasic.facebook.com/" data-title="Facebook Lite">Facebook Lite</button>
+      <button class="choice" data-custom="true">Custom URL</button>
+      <button id="closeModal" class="close">Cancel</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
