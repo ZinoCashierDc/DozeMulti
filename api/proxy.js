@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 export default async function handler(req, res) {
   const { url } = req.query;
 
@@ -20,9 +18,10 @@ export default async function handler(req, res) {
       },
     });
 
-    const text = await response.text();
-    res.setHeader("Content-Type", "text/html");
-    res.status(200).send(text);
+    const html = await response.text();
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(html);
   } catch (err) {
     res.status(500).send("Proxy error: " + err.message);
   }
