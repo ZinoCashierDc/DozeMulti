@@ -1,42 +1,33 @@
+// api/proxy.js
+import fetch from "node-fetch";
+
 export default async function handler(req, res) {
-  const { url } = req.query;
-
-  if (!url) {
-    return res.status(400).send("Missing url parameter");
-  }
-
   try {
-    const targetUrl = decodeURIComponent(url);
+    const targetUrl = req.query.url;
 
-    if (!/^https?:\/\//.test(targetUrl)) {
+    if (!targetUrl) {
+      return res.status(400).send("Missing ?url=");
+    }
+
+    // Block localhost / file:// for safety
+    if (targetUrl.startsWith("file:") || targetUrl.includes("localhost")) {
       return res.status(400).send("Invalid URL");
     }
 
-    // Force Facebook to always use mobile/lite
-    let finalUrl = targetUrl
-      .replace("www.facebook.com", "m.facebook.com")
-      .replace("facebook.com", "m.facebook.com")
-      .replace("mbasic.m.facebook.com", "mbasic.facebook.com");
-
-    const response = await fetch(finalUrl, {
-      method: "GET",
+    const response = await fetch(targetUrl, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-      },
+        "user-agent": req.headers["user-agent"] || "Mozilla/5.0",
+        "accept": req.headers["accept"] || "*/*"
+      }
     });
 
-    const text = await response.text();
+    const contentType = response.headers.get("content-type");
+    res.setHeader("Content-Type", contentType || "text/html");
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "no-store");
-    res.status(response.status).send(text);
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
   } catch (err) {
     console.error("Proxy error:", err);
-    res.status(500).send("Proxy request failed: " + err.message);
+    res.status(500).send("Proxy failed: " + err.message);
   }
 }
