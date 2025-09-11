@@ -1,5 +1,7 @@
-/* app.js - DozaMulti client-only prototype */
-const PROXY_BASE = "/api/proxy?url=";
+/* app.js - DozaMulti client-only prototype
+   Places iframes for each space and keeps them in DOM to preserve session/state per space.
+*/
+const PROXY_BASE = "/api/proxy?url=";  
 // If PROXY_BASE is empty it will load direct URLs.
 
 const spaceListEl = document.getElementById('spaceList');
@@ -16,13 +18,10 @@ const addFacebookLite = document.getElementById('addFacebookLite');
 const urlInput = document.getElementById('urlInput');
 const addCustom = document.getElementById('addCustom');
 
-const newBlankBtn = document.getElementById('newBlankBtn');
-const openAllBtn = document.getElementById('openAllBtn');
-const reloadFrameBtn = document.getElementById('reloadFrame');
-const openFrameBtn = document.getElementById('openFrame');
-
 let spaces = JSON.parse(localStorage.getItem('doza_spaces') || '[]');
 let activeId = localStorage.getItem('doza_active') || null;
+
+// Keep a map of iframe elements
 const frames = new Map();
 
 function save(){
@@ -41,22 +40,17 @@ function baseTitleFromUrl(url){
   }
 }
 
-function countSameTitle(baseTitle){
-  return spaces.filter(s => (s.baseTitle === baseTitle)).length;
-}
-
 function createIframeForSpace(s){
   if(frames.has(s.id)) return frames.get(s.id);
 
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
-  iframe.setAttribute(
-    'sandbox',
-    'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox'
-  );
 
-  // ✅ Fixed: use s.url not site.url
+  // sandbox: isolate but allow logins/forms
+  iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+
+  // Always go through proxy
   iframe.src = PROXY_BASE + encodeURIComponent(s.url);
 
   iframe.style.display = 'none';
@@ -79,26 +73,19 @@ function renderList(){
     el.className = 'space-item';
     const displayTitle = s.title + (s.number ? ` #${s.number}` : '');
     el.innerHTML = `
-      <div class="space-thumb" aria-hidden>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 8h18M3 12h18M3 16h18" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
-      </div>
       <div style="flex:1">
         <div style="font-weight:700">${escapeHtml(displayTitle)}</div>
         <div class="small">${escapeHtml(s.url)}</div>
       </div>
       <div class="actions">
-        <button data-id="${s.id}" class="btn ghost openBtn" title="Open this space">
-          <svg class="icon" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14"/></svg>
-        </button>
-        <button data-id="${s.id}" class="btn ghost delBtn" title="Delete">
-          <svg class="icon" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6M10 6V4h4v2"/></svg>
-        </button>
+        <button data-id="${s.id}" class="openBtn">Open</button>
+        <button data-id="${s.id}" class="delBtn">Delete</button>
       </div>
     `;
     el.querySelector('.openBtn').onclick = () => activateSpace(s.id);
     el.querySelector('.delBtn').onclick = () => {
       const ifr = frames.get(s.id);
-      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
+      if (ifr) { ifr.remove(); frames.delete(s.id); }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
       save(); renderAll();
@@ -118,18 +105,14 @@ function buildTabs(){
     t.className = 'tab' + (s.id === activeId ? ' active' : '');
     const label = `${s.title}${s.number ? ' #' + s.number : ''}`;
     t.innerHTML = `<span>${escapeHtml(label)}</span>`;
-    const numSpan = document.createElement('span');
-    numSpan.className = 'num';
-    numSpan.textContent = s.id.slice(-3);
-    t.appendChild(numSpan);
 
     const close = document.createElement('span');
     close.className = 'close-icon';
-    close.innerHTML = `<svg viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M18 6L6 18M6 6l12 12"/></svg>`;
+    close.textContent = "×";
     close.onclick = (ev) => {
       ev.stopPropagation();
       const ifr = frames.get(s.id);
-      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
+      if (ifr) { ifr.remove(); frames.delete(s.id); }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
       save(); renderAll();
@@ -147,7 +130,6 @@ function renderAll(){
   if (!activeId && spaces.length) activeId = spaces[0].id;
   if (activeId) showActiveFrame(activeId);
   if (!spaces.length) {
-    frameWrap.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
     framesContainer.innerHTML = '';
     notice.style.display = 'block';
     notice.textContent = 'No spaces — add one with the + button.';
@@ -162,45 +144,29 @@ function activateSpace(id){
 
 function showActiveFrame(id){
   const s = spaces.find(x => x.id === id);
-  if (!s) {
-    notice.style.display = 'block';
-    notice.textContent = 'Space not found.';
-    return;
-  }
-  notice.style.display = 'none';
+  if (!s) return;
 
+  notice.style.display = 'none';
   let iframe = createIframeForSpace(s);
 
   frames.forEach((f, key) => {
-    f.style.display = (key === id ? 'block' : 'none');
+    f.style.display = (key === id) ? 'block' : 'none';
   });
-
-  let loaded = false;
-  const loadHandler = () => { loaded = true; notice.style.display = 'none'; iframe.removeEventListener('load', loadHandler); };
-  iframe.addEventListener('load', loadHandler);
-  notice.style.display = 'block';
-  notice.textContent = 'Loading space...';
-  setTimeout(() => {
-    if (!loaded) {
-      notice.style.display = 'block';
-      notice.textContent = 'Content may be blocked from embedding. Try "Open" to open in a new tab.';
-    }
-  }, 4000);
 }
 
+/* escape HTML */
 function escapeHtml(text) {
   if (!text) return '';
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* Modal handlers */
+/* Modal add handlers */
 plusBtn.onclick = () => addModal.classList.remove('hidden');
 closeModal.onclick = () => addModal.classList.add('hidden');
-addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.classList.add('hidden'); });
 
 addFacebook.onclick = () => {
   addModal.classList.add('hidden');
-  addNewSpace('https://mbasic.facebook.com', 'Facebook');
+  addNewSpace('https://m.facebook.com', 'Facebook');
 };
 addFacebookLite.onclick = () => {
   addModal.classList.add('hidden');
@@ -224,39 +190,14 @@ addCustom.onclick = () => {
 
 function addNewSpace(url, title){
   const baseTitle = baseTitleFromUrl(url);
-  const sameCount = countSameTitle(baseTitle);
+  const sameCount = spaces.filter(s => s.baseTitle === baseTitle).length;
   const number = sameCount + 1;
-  const s = { id: uid(), url: url, title: title || baseTitle, baseTitle, number };
-  spaces.unshift(s);
-  createIframeForSpace(s);
-  activeId = s.id;
-  save();
-  renderAll();
-}
-
-/* Other buttons */
-newBlankBtn.onclick = () => {
-  const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
+  const s = { id: uid(), url, title: title || baseTitle, baseTitle, number };
   spaces.unshift(s);
   createIframeForSpace(s);
   activeId = s.id;
   save(); renderAll();
-};
+}
 
-openAllBtn.onclick = () => spaces.forEach(s => window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank'));
-
-reloadFrameBtn.onclick = () => {
-  const iframe = frames.get(activeId);
-  if (iframe) {
-    try { iframe.contentWindow.location.reload(); }
-    catch(e) { iframe.src = iframe.src; }
-  }
-};
-
-openFrameBtn.onclick = () => {
-  const s = spaces.find(x => x.id === activeId);
-  if (s) window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank', 'noopener');
-};
-
-/* Initial render */
+/* init */
 renderAll();
