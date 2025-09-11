@@ -1,50 +1,27 @@
-// pages/api/proxy.js
+// api/proxy.js
 export default async function handler(req, res) {
-  const targetUrl = req.query.url;
-
-  if (!targetUrl) {
-    res.status(400).send("Missing url param");
-    return;
-  }
+  const target = req.query.url;
+  if (!target) return res.status(400).send("Missing url");
 
   try {
-    const response = await fetch(targetUrl, {
-      method: "GET",
+    const response = await fetch(target, {
       headers: {
-        // Pretend to be a normal browser
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        "cache-control": "no-cache",
-        "pragma": "no-cache"
-      }
+        "User-Agent":
+          "Mozilla/5.0 (Linux; Android 10; Mobile; rv:109.0) Gecko/110.0 Firefox/110.0",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Connection": "keep-alive",
+      },
     });
 
-    let text = await response.text();
-
-    // 🛡 Remove blocking meta tags
-    text = text.replace(
-      /<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi,
-      ""
-    );
-    text = text.replace(
-      /<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi,
-      ""
-    );
-
-    // 🛡 Remove inline CSP headers
-    res.removeHeader("content-security-policy");
-    res.removeHeader("x-frame-options");
-
-    // 🛡 Always respond as HTML
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("X-Frame-Options", "ALLOWALL");
-
-    res.status(200).send(text);
-  } catch (err) {
-    console.error("Proxy error:", err);
-    res.status(500).send("Proxy error: " + err.message);
+    // Pass raw HTML but strip frame-blocking headers
+    const html = await response.text();
+    res.setHeader("Content-Type", "text/html");
+    res.setHeader("X-Frame-Options", ""); // override
+    res.setHeader("Content-Security-Policy", ""); // override
+    res.status(200).send(html);
+  } catch (e) {
+    res.status(500).send("Proxy error: " + e.message);
   }
 }
