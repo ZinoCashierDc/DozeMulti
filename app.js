@@ -2,7 +2,7 @@
    Places iframes for each space and keeps them in DOM to preserve session/state per space.
    Optional PROXY_BASE: set to your serverless proxy base URL (e.g. "/api/proxy?url=" or "https://your-proxy.example/?u=").
 */
-const PROXY_BASE = "doze-multi.vercel.app/api/proxy?url="
+const PROXY_BASE = "/api/proxy?url=";
 // If PROXY_BASE is empty it will load direct URLs.
 
 const spaceListEl = document.getElementById('spaceList');
@@ -60,7 +60,7 @@ function createIframeForSpace(s){
   // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   // Use proxy if set
-  iframe.src = `doze-multi.vercel.app/api/proxy?url=${encodeURIComponent(site.url)}`;
+  iframe.src = `${PROXY_BASE}${encodeURIComponent(site.url)}`;
   // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
