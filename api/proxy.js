@@ -30,3 +30,7 @@ export default async function handler(req, res) {
     res.status(500).send("Proxy error: " + err.message);
   }
 }
+
+// inside your proxy
+res.setHeader("X-Frame-Options", ""); 
+res.setHeader("Content-Security-Policy", "");
