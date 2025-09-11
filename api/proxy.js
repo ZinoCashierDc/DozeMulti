@@ -1,29 +1,29 @@
-// api/proxy.js
+import fetch from "node-fetch";
+
 export default async function handler(req, res) {
+  const { url } = req.query;
+
+  if (!url) {
+    res.status(400).send("Missing url parameter");
+    return;
+  }
+
   try {
-    const targetUrl = req.query.url;
-
-    if (!targetUrl) {
-      return res.status(400).json({ error: "Missing ?url= parameter" });
-    }
-
-    // fetch the target URL
-    const response = await fetch(targetUrl, {
+    const response = await fetch(url, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
       },
     });
 
-    const contentType = response.headers.get("content-type") || "text/html";
-
-    // pipe response
-    const body = await response.text();
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.status(200).send(body);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Proxy request failed", details: error.message });
+    const text = await response.text();
+    res.setHeader("Content-Type", "text/html");
+    res.status(200).send(text);
+  } catch (err) {
+    res.status(500).send("Proxy error: " + err.message);
   }
 }
