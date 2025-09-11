@@ -1,0 +1,36 @@
+:root{
+  --bg:#0f1724; --card:#0b1220; --muted:#94a3b8; --accent:#22c55e;
+  --glass:rgba(255,255,255,0.04);
+}
+body{ font-family: Inter, ui-sans-serif, system-ui; background:linear-gradient(180deg,#071127 0%, #081426 100%); color:#e6eef8; margin:0; min-height:100vh; }
+.app{ max-width:1100px; margin:20px auto; padding:18px; display:grid; grid-template-columns:320px 1fr; gap:18px; }
+.panel{ background:rgba(255,255,255,0.03); border-radius:12px; padding:14px; box-shadow: 0 6px 18px rgba(2,6,23,0.6); }
+.header{ display:flex; gap:12px; align-items:center; }
+.logo{ width:46px; height:46px; background:linear-gradient(135deg,#22c55e,#06b6d4); border-radius:10px; display:grid; place-items:center; font-weight:700; color:#041022; }
+.title{ font-size:18px; font-weight:700; }
+.muted{ color:var(--muted); font-size:13px; }
+.space-list{ margin-top:12px; display:flex; flex-direction:column; gap:8px; max-height:66vh; overflow:auto; padding-right:6px; }
+.space-item{ display:flex; gap:10px; align-items:center; padding:10px; border-radius:10px; cursor:pointer; transition:all .12s; }
+.space-item:hover{ transform:translateY(-3px); background:var(--glass); }
+.space-thumb{ width:44px; height:44px; border-radius:8px; background:linear-gradient(135deg,#0ea5a8,#2563eb); display:grid; place-items:center; font-weight:800; color:white; }
+.controls{ display:flex; gap:8px; margin-top:10px; }
+.btn{ background:#0b1220; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.04); color:#dbeafe; cursor:pointer; }
+.btn.ghost{ background:transparent; border:1px dashed rgba(255,255,255,0.04); color:var(--muted); }
+.main-area{ display:flex; flex-direction:column; gap:12px; }
+.tabs{ display:flex; gap:8px; align-items:center; }
+.tab{ padding:8px 12px; border-radius:10px; background:rgba(255,255,255,0.02); cursor:pointer; }
+.tab.active{ background:linear-gradient(90deg,#0ea5a8,#2563eb); color:#041022; font-weight:700; }
+.frame-wrap{ background:#050816; border-radius:12px; min-height:66vh; overflow:hidden; border:1px solid rgba(255,255,255,0.03); }
+.frame{ width:100%; height:calc(66vh); border:0; }
+.notice{ padding:12px; border-radius:10px; background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); color:var(--muted); }
+.form-row{ display:flex; gap:8px; margin-top:8px; }
+input[type=text]{ background:transparent; border:1px solid rgba(255,255,255,0.04); padding:8px 10px; border-radius:8px; color:inherit; width:100%; }
+.small{ font-size:13px; color:var(--muted); }
+.icon{ width:16px; height:16px; display:inline-block; vertical-align:middle; }
+.actions{ margin-left:auto; display:flex; gap:8px; }
+.trash{ color:#fda4af; }
+
+/* Number badge */
+.space-index{
+  width:28px;height:28px;border-radius:8px;background:rgba(0,0,0,0.25);display:grid;place-items:center;font-weight:700;color:#dbeafe;margin-right:6px;
+}

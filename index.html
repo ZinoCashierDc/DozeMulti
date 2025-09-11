@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>DozaMulti — Multi-Space Dashboard (Prototype)</title>
+
+  <!-- Tailwind CDN (keeps your original look) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- local stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <div class="panel">
+      <div class="header">
+        <div class="logo">DOZE</div>
+        <div>
+          <div class="title">DozaMulti</div>
+          <div class="muted">Create and manage website spaces</div>
+        </div>
+        <div class="actions">
+          <button id="exportBtn" class="btn ghost" title="Export spaces">Export</button>
+          <button id="importBtn" class="btn ghost" title="Import spaces">Import</button>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:12px">
+        Add a new space (enter full URL). Sites that <strong>disallow framing</strong> will show a blocked notice.
+      </div>
+
+      <div class="form-row">
+        <input id="urlInput" type="text" placeholder="https://example.com" />
+        <button id="addBtn" class="btn">Add</button>
+      </div>
+
+      <div class="controls">
+        <button id="newBlankBtn" class="btn ghost">New blank</button>
+        <button id="openAllBtn" class="btn ghost">Open all (new windows)</button>
+      </div>
+
+      <div class="space-list" id="spaceList" aria-label="Spaces"></div>
+
+      <div style="margin-top:12px" class="small">Tip: test with pages you control to avoid embed blocks.</div>
+    </div>
+
+    <div class="main-area">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="tabs" id="tabs"></div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button id="reloadFrame" class="btn ghost" title="Reload current">Reload</button>
+          <button id="openFrame" class="btn" title="Open current in new tab">Open</button>
+        </div>
+      </div>
+
+      <div class="frame-wrap panel" id="frameWrap">
+        <div id="notice" class="notice">No space selected — add a space on the left or pick a tab.</div>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center">
+        <div class="small">Local prototype — data stored in your browser only.</div>
+        <div style="margin-left:auto" class="small">DozaMulti Prototype</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
