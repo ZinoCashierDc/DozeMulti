@@ -1,5 +1,4 @@
 // api/proxy.js
-import fetch from "node-fetch";
 
 export default async function handler(req, res) {
   try {
@@ -9,11 +8,12 @@ export default async function handler(req, res) {
       return res.status(400).send("Missing ?url=");
     }
 
-    // Block localhost / file:// for safety
+    // Block unsafe URLs
     if (targetUrl.startsWith("file:") || targetUrl.includes("localhost")) {
       return res.status(400).send("Invalid URL");
     }
 
+    // Use built-in fetch (Node 18 on Vercel has it)
     const response = await fetch(targetUrl, {
       headers: {
         "user-agent": req.headers["user-agent"] || "Mozilla/5.0",
@@ -22,10 +22,10 @@ export default async function handler(req, res) {
     });
 
     const contentType = response.headers.get("content-type");
-    res.setHeader("Content-Type", contentType || "text/html");
+    if (contentType) res.setHeader("Content-Type", contentType);
 
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
   } catch (err) {
     console.error("Proxy error:", err);
     res.status(500).send("Proxy failed: " + err.message);
