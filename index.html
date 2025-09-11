@@ -3,46 +3,88 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>DozaMulti — Multi-Space</title>
+  <title>DozaMulti — Multi-Space Dashboard (Prototype)</title>
   <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
 </head>
 <body>
   <div class="app">
-    <div class="sidebar">
+    <div class="panel left-panel">
       <div class="header">
-        <div class="logo">DM</div>
+        <div class="logo" aria-hidden="true">DM</div>
         <div>
           <div class="title">DozaMulti</div>
-          <div class="muted">Clone websites in multi-spaces</div>
+          <div class="muted">Create and manage website spaces</div>
+        </div>
+
+        <div class="actions">
+          <!-- Plus button opens add modal -->
+          <button id="plusBtn" class="btn" title="Add space">
+            <svg class="icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14"/></svg>
+          </button>
         </div>
       </div>
 
-      <div class="controls">
-        <button id="addBtn" class="btn">+</button>
+      <div class="muted" style="margin-top:12px">
+        Add a new space (use the +). Sites that block framing will show a notice.
       </div>
 
-      <div class="space-list" id="spaceList"></div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="newBlankBtn" class="btn ghost">New blank</button>
+        <button id="openAllBtn" class="btn ghost">Open all (tabs)</button>
+      </div>
+
+      <div class="space-list" id="spaceList" aria-label="Spaces"></div>
+
+      <div style="margin-top:12px" class="small">Tip: test with pages you control if embedding fails.</div>
     </div>
 
-    <div class="main">
-      <div class="tabs" id="tabs"></div>
-      <div class="frame-wrap" id="frameWrap">
-        <div class="notice">No space selected. Press + to add Facebook, Lite, or a custom site.</div>
+    <div class="main-area">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="tabs" id="tabs"></div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button id="reloadFrame" class="btn ghost" title="Reload current">Reload</button>
+          <button id="openFrame" class="btn" title="Open current in new tab">Open</button>
+        </div>
+      </div>
+
+      <div class="frame-wrap panel" id="frameWrap">
+        <div id="notice" class="notice">No space selected — add a space on the left or press +.</div>
+        <!-- iframes will be injected here (kept in DOM to preserve state) -->
+        <div id="framesContainer"></div>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center">
+        <div class="small">Local prototype — data saved in your browser only.</div>
+        <div style="margin-left:auto" class="small">DozaMulti Prototype</div>
       </div>
     </div>
   </div>
 
-  <!-- Popup chooser -->
-  <div id="chooser" class="chooser hidden">
-    <div class="chooser-box">
-      <h3>Select Space</h3>
-      <button data-site="facebook" class="choice">Facebook</button>
-      <button data-site="lite" class="choice">Facebook Lite</button>
-      <input id="customUrl" type="text" placeholder="Custom URL (https://...)" />
-      <button id="addCustom" class="choice">Add Custom</button>
-      <button id="closeChooser" class="close-btn">Close</button>
+  <!-- Add modal -->
+  <div id="addModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+    <div class="modal-panel">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <h3 id="addTitle" style="margin:0">Add a new space</h3>
+        <button id="closeModal" class="btn ghost" title="Close">
+          <svg class="icon" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button id="addFacebook" class="btn">Add Facebook</button>
+        <button id="addFacebookLite" class="btn">Add Facebook Lite</button>
+      </div>
+
+      <div class="small muted">Or enter a custom URL below (example: example.com or https://example.com)</div>
+      <div class="form-row" style="margin-top:8px">
+        <input id="urlInput" type="text" placeholder="https://example.com" />
+        <button id="addCustom" class="btn">Add</button>
+      </div>
+
+      <div style="margin-top:10px" class="small muted">Facebook Lite uses <code>mbasic.facebook.com</code> (more likely to stay in browser)</div>
     </div>
   </div>
+
+  <script src="app.js" defer></script>
 </body>
-</html>
+      </html>
