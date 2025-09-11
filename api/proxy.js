@@ -12,7 +12,7 @@ export default async function handler(req, res) {
       },
     });
 
-    // Copy response body as buffer
+    //Copy response body as buffer
     const body = await response.arrayBuffer();
 
     // Clone headers, but strip X-Frame-Options & CSP
