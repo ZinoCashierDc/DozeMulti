@@ -1,32 +1,50 @@
-// api/proxy.js
+// pages/api/proxy.js
 export default async function handler(req, res) {
-  const target = req.query.url;
+  const targetUrl = req.query.url;
 
-  if (!target) {
-    return res.status(400).json({ error: "Missing url parameter" });
+  if (!targetUrl) {
+    res.status(400).send("Missing url param");
+    return;
   }
 
   try {
-    const response = await fetch(target, {
+    const response = await fetch(targetUrl, {
+      method: "GET",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        // Pretend to be a normal browser
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        "cache-control": "no-cache",
+        "pragma": "no-cache"
       }
     });
 
-    // Copy headers, but clean security ones
-    const headers = {};
-    response.headers.forEach((value, key) => {
-      if (!["x-frame-options", "content-security-policy"].includes(key.toLowerCase())) {
-        headers[key] = value;
-      }
-    });
+    let text = await response.text();
 
-    // Force text/html for iframe rendering
-    headers["content-type"] = "text/html; charset=utf-8";
+    // 🛡 Remove blocking meta tags
+    text = text.replace(
+      /<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi,
+      ""
+    );
+    text = text.replace(
+      /<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi,
+      ""
+    );
 
-    res.writeHead(response.status, headers);
-    response.body.pipe(res);
-  } catch (e) {
-    res.status(500).json({ error: "Proxy error", details: e.message });
+    // 🛡 Remove inline CSP headers
+    res.removeHeader("content-security-policy");
+    res.removeHeader("x-frame-options");
+
+    // 🛡 Always respond as HTML
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("X-Frame-Options", "ALLOWALL");
+
+    res.status(200).send(text);
+  } catch (err) {
+    console.error("Proxy error:", err);
+    res.status(500).send("Proxy error: " + err.message);
   }
 }
