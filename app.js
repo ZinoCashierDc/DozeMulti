@@ -61,7 +61,7 @@ function createIframeForSpace(s){
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
 
   // ✅ Fixed: use s.url instead of site.url
-  iframe.src = PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url;
+  iframe.src = PROXY_BASE + encodeURIComponent(s.url);
 
   // Loading UI
   iframe.style.display = 'none';
