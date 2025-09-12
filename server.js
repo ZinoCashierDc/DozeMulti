@@ -3,10 +3,12 @@ const puppeteer = require('puppeteer');
 
 const app = express();
 
+// Root check
 app.get('/', (req, res) => {
   res.send('DozeMulti is running 🚀');
 });
 
+// Endpoint: Fetch page HTML
 app.get('/browse', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send('Missing url');
@@ -30,6 +32,32 @@ app.get('/browse', async (req, res) => {
 
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Endpoint: Take screenshot
+app.get('/screenshot', async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send('Missing url');
+
+  try {
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox','--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+
+    await page.goto(url, { waitUntil: 'networkidle2' });
+
+    const buffer = await page.screenshot({ fullPage: true });
+    await browser.close();
+
+    res.setHeader('Content-Type', 'image/png');
+    res.send(buffer);
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
