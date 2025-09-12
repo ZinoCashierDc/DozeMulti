@@ -1,23 +1,23 @@
 // api/proxy.js (Node serverless for Vercel)
-// This is a single-file solution with NO external dependencies.
-// This version FIXES the ".raw is not a function" crash.
+// This is the final, single-file solution that manually handles decompression.
+// It is designed specifically to fix the garbled text problem.
 const { Readable } = require('stream');
+const zlib = require('zlib'); // Node.js's built-in decompression library.
 
-// A Set of headers that should NOT be forwarded from the target server back to the client.
-// This is the key to fixing the "rubbish" output and security issues.
+// Headers that should NOT be forwarded from the target server back to the client.
 const RESPONSE_HEADERS_TO_STRIP = new Set([
-    'content-encoding',       // CRITICAL: This fixes the garbled/rubbish text issue.
-    'content-length',         // The length changes after decompression, so this must be removed.
-    'content-security-policy',// Prevents the site from loading inside the proxy.
-    'x-frame-options',        // Also prevents the site from being embedded.
-    'strict-transport-security', // Can cause HTTPS issues in the proxy.
-    'connection',             // Hop-by-hop header.
-    'keep-alive',             // Hop-by-hop header.
-    'transfer-encoding',      // Hop-by-hop header.
-    'upgrade'                 // Hop-by-hop header.
+    'content-encoding',       // CRITICAL: We are decompressing, so this is no longer valid.
+    'content-length',         // The length will change after decompression.
+    'content-security-policy',
+    'x-frame-options',
+    'strict-transport-security',
+    'connection',
+    'keep-alive',
+    'transfer-encoding',
+    'upgrade'
 ]);
 
-// In-memory storage for cookies to handle user logins and sessions.
+// In-memory storage for cookies.
 const cookieJars = new Map();
 
 module.exports = async (req, res) => {
@@ -27,7 +27,6 @@ module.exports = async (req, res) => {
             return res.status(400).send('Error: The "url" query parameter is missing.');
         }
 
-        // Add "https://" by default if no protocol is specified.
         const targetUrl = urlParam.includes('://') ? urlParam : `https://` + urlParam;
         const target = new URL(targetUrl);
 
@@ -35,6 +34,8 @@ module.exports = async (req, res) => {
         const outHeaders = {
             'host': target.hostname,
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            // IMPORTANT: Tell the server what compressions we can handle.
+            'accept-encoding': 'gzip, deflate, br'
         };
 
         for (const [key, value] of Object.entries(req.headers)) {
@@ -58,9 +59,9 @@ module.exports = async (req, res) => {
             redirect: 'manual',
         });
 
-        // --- Step 3: Handle the response ---
+        // --- Step 3: Handle the response headers ---
 
-        // Handle redirects (e.g., HTTP 301, 302).
+        // Handle redirects
         if ([301, 302, 307, 308].includes(upstreamResponse.status)) {
             const location = upstreamResponse.headers.get('location');
             if (location) {
@@ -71,15 +72,11 @@ module.exports = async (req, res) => {
             }
         }
 
-        // Capture and store any new cookies from the server.
-        // THIS IS THE FIX: We iterate the headers to get cookies instead of using .raw()
+        // Capture and store cookies
         const setCookieHeaders = [];
         upstreamResponse.headers.forEach((value, key) => {
-            if (key.toLowerCase() === 'set-cookie') {
-                setCookieHeaders.push(value);
-            }
+            if (key.toLowerCase() === 'set-cookie') setCookieHeaders.push(value);
         });
-        
         if (setCookieHeaders.length > 0) {
             setCookieHeaders.forEach(cookieStr => {
                 const [cookiePair] = cookieStr.split(';');
@@ -89,21 +86,28 @@ module.exports = async (req, res) => {
             cookieJars.set(session, cookieJar);
         }
 
-        // Copy headers from the server's response to our final response.
+        // Copy and filter headers for the final response
         upstreamResponse.headers.forEach((value, key) => {
             if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
                 res.setHeader(key, value);
             }
         });
-
         res.status(upstreamResponse.status);
 
-        // Stream the response body directly to the client.
-        if (upstreamResponse.body) {
-            const bodyStream = Readable.fromWeb(upstreamResponse.body);
-            bodyStream.pipe(res);
+        // --- Step 4: Decompress and stream the response body ---
+        // This is the critical part that fixes the garbled text.
+        const encoding = upstreamResponse.headers.get('content-encoding');
+        const bodyStream = Readable.fromWeb(upstreamResponse.body);
+
+        if (encoding === 'gzip') {
+            bodyStream.pipe(zlib.createGunzip()).pipe(res);
+        } else if (encoding === 'deflate') {
+            bodyStream.pipe(zlib.createInflate()).pipe(res);
+        } else if (encoding === 'br') {
+            bodyStream.pipe(zlib.createBrotliDecompress()).pipe(res);
         } else {
-            res.end();
+            // No compression, just send it through.
+            bodyStream.pipe(res);
         }
 
     } catch (err) {
