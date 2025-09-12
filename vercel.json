@@ -1,0 +1,14 @@
+{
+  "rewrites": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "(?<sub>.+)\\.doze-multi-gilt.vercel.app\\.com"
+        }
+      ],
+      "destination": "/api/proxy"
+    }
+  ]
+}
