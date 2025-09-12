@@ -1,10 +1,9 @@
-/* app.js - DozaMulti client-only prototype
-   MODIFIED to use fetch() for loading frames to enable cookie passing via proxy.
-   Places iframes for each space and keeps them in DOM to preserve session/state per space.
-   Optional PROXY_BASE: set to your serverless proxy base URL (e.g. "/api/proxy?url=" or "https://your-proxy.example/?u=").
+/* app.js - DozeMulti Control Panel
+   This version creates iframes pointing to unique subdomains for true session isolation.
 */
-const PROXY_BASE = "/api/proxy?url=";
-// If PROXY_BASE is empty it will load direct URLs.
+
+// !!! IMPORTANT: Set this to your actual custom domain !!!
+const MY_DOMAIN = "dozemulti.com";
 
 const spaceListEl = document.getElementById('spaceList');
 const tabsEl = document.getElementById('tabs');
@@ -25,103 +24,48 @@ const openAllBtn = document.getElementById('openAllBtn');
 const reloadFrameBtn = document.getElementById('reloadFrame');
 const openFrameBtn = document.getElementById('openFrame');
 
-let spaces = JSON.parse(localStorage.getItem('doza_spaces') || '[]');
-let activeId = localStorage.getItem('doza_active') || null;
+let spaces = JSON.parse(localStorage.getItem('doza_spaces_v2') || '[]');
+let activeId = localStorage.getItem('doza_active_v2') || null;
 
-// Keep a map of iframe elements
 const frames = new Map();
 
-function save(){
-  localStorage.setItem('doza_spaces', JSON.stringify(spaces));
-  localStorage.setItem('doza_active', activeId || '');
+function save() {
+  localStorage.setItem('doza_spaces_v2', JSON.stringify(spaces));
+  localStorage.setItem('doza_active_v2', activeId || '');
 }
 
-function uid(){ return 's_' + Math.random().toString(36).slice(2,9); }
+function uid() { return 's_' + Math.random().toString(36).slice(2, 9); }
 
-function baseTitleFromUrl(url){
+// --- NEW: Generates the unique subdomain for a space ---
+function getSpaceUrl(space) {
+  if (space.url === 'about:blank') return 'about:blank';
+  
   try {
-    const u = new URL(url);
-    return u.hostname.replace('www.','');
-  } catch(e) {
-    return url;
-  }
-}
-
-function countSameTitle(baseTitle){
-  return spaces.filter(s => (s.baseTitle === baseTitle)).length;
-}
-
-// --- NEW COOKIE HELPER FUNCTIONS ---
-function getSpaceCookies(spaceId) {
-  return localStorage.getItem('space_cookies_' + spaceId) || '';
-}
-
-function setSpaceCookies(spaceId, cookies) {
-  if (cookies) {
-    localStorage.setItem('space_cookies_' + spaceId, cookies);
-  }
-}
-
-// --- NEW: FUNCTION TO LOAD IFRAME CONTENT VIA FETCH ---
-async function loadFrameWithFetch(iframe, space) {
-  if (space.url === 'about:blank') {
-    iframe.src = 'about:blank';
-    notice.style.display = 'none';
-    return;
-  }
-
-  notice.style.display = 'block';
-  notice.textContent = 'Loading space...';
-
-  try {
-    const proxyUrl = PROXY_BASE + encodeURIComponent(space.url);
-    const headers = new Headers();
-    const savedCookies = getSpaceCookies(space.id);
-    if (savedCookies) {
-      headers.append('x-proxy-cookies', savedCookies);
-    }
-
-    const response = await fetch(proxyUrl, { headers: headers });
-
-    // After fetch, get the NEW cookies the proxy captured from Facebook
-    const newCookies = response.headers.get('x-set-proxy-cookies');
-    setSpaceCookies(space.id, newCookies);
-
-    if (!response.ok) {
-        throw new Error(`Proxy returned status ${response.status}`);
-    }
-
-    const html = await response.text();
-
-    // Use a Blob URL to load the content. This is crucial for sandboxing and ensuring the <base> tag works.
-    const blob = new Blob([html], { type: 'text/html' });
+    const urlObj = new URL(space.url);
+    // Convert 'www.facebook.com' into 'www-facebook-com'
+    const hostPart = urlObj.hostname.replace(/\./g, '-');
+    const uniqueId = space.id.replace(/_/g, ''); // Use the space's ID for persistence
     
-    // Revoke old blob URL if it exists to prevent memory leaks
-    if (iframe.dataset.blobUrl) {
-      URL.revokeObjectURL(iframe.dataset.blobUrl);
-    }
-    
-    const blobUrl = URL.createObjectURL(blob);
-    iframe.dataset.blobUrl = blobUrl; // Store for later cleanup
-    iframe.src = blobUrl;
-    notice.style.display = 'none';
-
-  } catch (error) {
-    console.error('Failed to load frame:', error);
-    notice.style.display = 'block';
-    notice.textContent = 'Content may be blocked or failed to load (X-Frame-Options/CSP). Try "Open" to open in a new tab.';
+    return `https://${hostPart}-${uniqueId}.${MY_DOMAIN}`;
+  } catch (e) {
+    console.error("Invalid URL for space:", space);
+    return 'about:blank';
   }
 }
 
-
-function createIframeForSpace(s){
-  if(frames.has(s.id)) return frames.get(s.id);
+function createIframeForSpace(s) {
+  if (frames.has(s.id)) return frames.get(s.id);
 
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
+  // Sandbox is still good practice!
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   iframe.style.display = 'none';
+
+  // Set the source to the unique subdomain URL
+  iframe.src = getSpaceUrl(s);
+
   framesContainer.appendChild(iframe);
   frames.set(s.id, iframe);
   return iframe;
@@ -132,7 +76,7 @@ function renderList(){
   spaces.forEach(s => {
     const el = document.createElement('div');
     el.className = 'space-item';
-    const displayTitle = s.title + (s.number ? ` #${s.number}` : '');
+    const displayTitle = s.title;
     el.innerHTML = `
       <div class="space-thumb" aria-hidden>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 8h18M3 12h18M3 16h18" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -154,7 +98,6 @@ function renderList(){
     el.querySelector('.delBtn').onclick = () => {
       const ifr = frames.get(s.id);
       if (ifr) {
-        if (ifr.dataset.blobUrl) URL.revokeObjectURL(ifr.dataset.blobUrl);
         try { ifr.remove(); } catch(e) {}
         frames.delete(s.id);
       }
@@ -176,7 +119,7 @@ function buildTabs(){
   spaces.forEach(s => {
     const t = document.createElement('div');
     t.className = 'tab' + (s.id === activeId ? ' active' : '');
-    const label = `${s.title}${s.number ? ' #' + s.number : ''}`;
+    const label = `${s.title}`;
     t.innerHTML = `<span>${escapeHtml(label)}</span>`;
     const numSpan = document.createElement('span');
     numSpan.className = 'num';
@@ -189,10 +132,7 @@ function buildTabs(){
     close.onclick = (ev) => {
       ev.stopPropagation();
       const ifr = frames.get(s.id);
-      if (ifr) {
-          if (ifr.dataset.blobUrl) URL.revokeObjectURL(ifr.dataset.blobUrl);
-          try { ifr.remove(); } catch(e){} frames.delete(s.id);
-      }
+      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
       save(); renderAll();
@@ -208,9 +148,7 @@ function renderAll(){
   renderList();
   buildTabs();
   if (!activeId && spaces.length) activeId = spaces[0].id;
-  if (activeId) {
-    showActiveFrame(activeId);
-  }
+  if (activeId) showActiveFrame(activeId);
   if (!spaces.length) {
     frameWrap.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
     notice.style.display = 'block';
@@ -219,44 +157,29 @@ function renderAll(){
   save();
 }
 
-async function activateSpace(id){
+function activateSpace(id){
   activeId = id;
-  // Hide all frames immediately for a snappier UI
-  frames.forEach((f) => { f.style.display = 'none'; });
-  // Re-render tabs to show the active one
-  buildTabs();
-  renderList();
-  await showActiveFrame(id);
-  save();
+  renderAll();
 }
 
-// MODIFIED to be async and use the new loading function
-async function showActiveFrame(id){
+function showActiveFrame(id){
   const s = spaces.find(x => x.id === id);
-  if (!s) {
-    notice.style.display = 'block';
-    notice.textContent = 'Space not found.';
-    return;
-  }
-  
-  const iframe = createIframeForSpace(s);
-  
-  // Hide other frames
+  if (!s) return;
+
+  notice.style.display = 'none';
+  let iframe = createIframeForSpace(s);
+
   frames.forEach((f, key) => {
     f.style.display = (key === id) ? 'block' : 'none';
   });
-
-  // Only load content if the iframe doesn't seem to have content already.
-  // This is a simple check; reloading will force it.
-  if (!iframe.src || iframe.src === 'about:blank') {
-    await loadFrameWithFetch(iframe, s);
-  }
 }
+
 
 function escapeHtml(text) {
   if (!text) return '';
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
 
 /* Add handlers for modal & adding spaces */
 plusBtn.onclick = () => addModal.classList.remove('hidden');
@@ -279,7 +202,7 @@ addCustom.onclick = () => {
   if (!/^[a-zA-Z]+:\/\//.test(raw)) final = 'https://' + raw;
   try {
     const parsed = new URL(final);
-    addNewSpace(parsed.href, parsed.hostname);
+    addNewSpace(parsed.href, parsed.hostname.replace('www.',''));
     urlInput.value = '';
     addModal.classList.add('hidden');
   } catch(e) {
@@ -288,38 +211,27 @@ addCustom.onclick = () => {
 };
 
 function addNewSpace(url, title){
-  const baseTitle = baseTitleFromUrl(url);
-  const sameCount = countSameTitle(baseTitle);
-  const number = sameCount + 1;
-  const s = { id: uid(), url: url, title: title || baseTitle, baseTitle, number };
-  spaces.unshift(s);
-  createIframeForSpace(s); // Creates the element but does not load it
-  activateSpace(s.id); // activateSpace will handle loading
-}
-
-/* other buttons */
-newBlankBtn.onclick = () => {
-  const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
+  const s = { id: uid(), url: url, title: title };
   spaces.unshift(s);
   createIframeForSpace(s);
   activateSpace(s.id);
-};
+}
 
-openAllBtn.onclick = () => spaces.forEach(s => window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank'));
 
-// MODIFIED to be async and use the new loading function
-reloadFrameBtn.onclick = async () => {
+/* other buttons */
+reloadFrameBtn.onclick = () => {
   const iframe = frames.get(activeId);
-  const space = spaces.find(s => s.id === activeId);
-  if (iframe && space) {
-    await loadFrameWithFetch(iframe, space);
+  if (iframe) {
+      iframe.src = iframe.src; // Simple way to reload
   }
 };
 
 openFrameBtn.onclick = () => {
   const s = spaces.find(x => x.id === activeId);
-  if (s) window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank', 'noopener');
+  if (s) window.open(getSpaceUrl(s), '_blank', 'noopener');
 };
 
 /* initial render */
+// Create all iframes on startup
+spaces.forEach(s => createIframeForSpace(s));
 renderAll();
