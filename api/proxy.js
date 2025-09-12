@@ -1,17 +1,25 @@
-/ api/proxy.js  (Node serverless for Vercel)
+// /api/proxy.js
 const cookieJars = new Map();
-const HOP_BY_HOP = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailers','transfer-encoding','upgrade']);
+const HOP_BY_HOP = new Set([
+  'connection','keep-alive','proxy-authenticate','proxy-authorization',
+  'te','trailers','transfer-encoding','upgrade'
+]);
 
 module.exports = async (req, res) => {
   try {
-    const url = req.query.url || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
-    const session = req.query.session || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) || 'default';
+    const url =
+      req.query.url ||
+      (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
+    const session =
+      req.query.session ||
+      (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) ||
+      'default';
+
     if (!url) {
       res.status(400).send('Missing url parameter');
       return;
     }
 
-    // parse and allow only http/https
     const target = new URL(url);
     if (!['http:', 'https:'].includes(target.protocol)) {
       res.status(400).send('Invalid protocol');
@@ -19,26 +27,30 @@ module.exports = async (req, res) => {
     }
 
     // build outgoing headers
-    const outHeaders = {};
+    const outHeaders = {
+      // force a real browser UA
+      'user-agent':
+        req.headers['user-agent'] ||
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/129.0 Safari/537.36',
+      'accept-language': req.headers['accept-language'] || 'en-US,en;q=0.9',
+    };
+
     for (const [k, v] of Object.entries(req.headers || {})) {
       if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-      if (k.toLowerCase() === 'host') continue;
+      if (['host','user-agent','accept-language'].includes(k.toLowerCase())) continue;
       outHeaders[k] = v;
     }
 
-    // attach cookies stored for this session
+    // attach cookies for this session
     const jar = cookieJars.get(session) || {};
     const cookieHeader = Object.values(jar).join('; ');
     if (cookieHeader) outHeaders['cookie'] = cookieHeader;
 
-    // body for POST/PUT/PATCH
+    // request body
     let body = null;
     if (['POST','PUT','PATCH'].includes(req.method)) {
       body = req.rawBody || req.body;
-      // express sometimes parse body; ensure Buffer if available
-      if (!body && req.pipe) {
-        // rarely happens in serverless; ignore
-      }
     }
 
     const fetchOptions = {
@@ -48,35 +60,38 @@ module.exports = async (req, res) => {
       redirect: 'manual'
     };
 
-    // use global fetch (Node 18+ on Vercel)
     const upstream = await fetch(target.toString(), fetchOptions);
 
-    // capture set-cookie headers and store in jar
-    const setCookies = upstream.headers.raw ? upstream.headers.raw()['set-cookie'] : null;
-    if (setCookies && Array.isArray(setCookies)) {
+    // save cookies
+    const setCookieHeaders = upstream.headers.get('set-cookie');
+    if (setCookieHeaders) {
       const cur = cookieJars.get(session) || {};
-      setCookies.forEach(sc => {
+      setCookieHeaders.split(',').forEach(sc => {
         const pair = sc.split(';')[0].trim();
         const i = pair.indexOf('=');
         if (i > -1) {
           const name = pair.slice(0,i);
-          cur[name] = pair; // store "name=value"
+          cur[name] = pair;
         }
       });
       cookieJars.set(session, cur);
     }
 
-    // copy response headers, excluding hop-by-hop
+    // forward headers
     upstream.headers.forEach((val, key) => {
       if (HOP_BY_HOP.has(key.toLowerCase())) return;
-      // Do not strip security headers here — forward them (some sites need them).
       res.setHeader(key, val);
     });
 
-    // pipe status and body
+    // important: CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
+    // send status + body
     res.status(upstream.status);
     const arrayBuffer = await upstream.arrayBuffer();
     res.send(Buffer.from(arrayBuffer));
+
   } catch (err) {
     console.error('Proxy error', err);
     res.status(500).send('Proxy error: ' + (err && err.message ? err.message : String(err)));
