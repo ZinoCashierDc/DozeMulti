@@ -1,23 +1,29 @@
 // api/proxy.js
 export default async function handler(req, res) {
   try {
-    const { url } = req.query;
-    if (!url) return res.status(400).send("Missing url");
+    const targetUrl = req.query.url;
 
-    const target = decodeURIComponent(url);
+    if (!targetUrl) {
+      return res.status(400).json({ error: "Missing ?url= parameter" });
+    }
 
-    const r = await fetch(target, {
+    // fetch the target URL
+    const response = await fetch(targetUrl, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) " +
-          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15A372 Safari/604.1",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
       },
     });
 
-    const body = await r.text();
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(body);
-  } catch (err) {
-    res.status(500).send("Proxy error: " + err.message);
+    const contentType = response.headers.get("content-type") || "text/html";
+
+    // pipe response
+    const body = await response.text();
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(200).send(body);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Proxy request failed", details: error.message });
   }
 }
