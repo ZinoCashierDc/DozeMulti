@@ -1,5 +1,6 @@
 // api/proxy.js (Node serverless for Vercel)
 // This is a single-file solution with NO external dependencies.
+// This version FIXES the ".raw is not a function" crash.
 const { Readable } = require('stream');
 
 // A Set of headers that should NOT be forwarded from the target server back to the client.
@@ -32,20 +33,16 @@ module.exports = async (req, res) => {
 
         // --- Step 1: Prepare the request to the target server ---
         const outHeaders = {
-            // Set the 'Host' header to the target's hostname. This is ESSENTIAL.
             'host': target.hostname,
-            // Use a standard browser User-Agent to avoid being blocked.
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
         };
 
-        // Copy most headers from the client's request.
         for (const [key, value] of Object.entries(req.headers)) {
-            if (key.toLowerCase() !== 'host') { // The 'host' header is already set.
+            if (key.toLowerCase() !== 'host') {
                 outHeaders[key] = value;
             }
         }
         
-        // Add stored cookies for this session to the request.
         const session = req.query.session || 'default';
         const cookieJar = cookieJars.get(session) || {};
         const cookieHeader = Object.values(cookieJar).join('; ');
@@ -57,8 +54,8 @@ module.exports = async (req, res) => {
         const upstreamResponse = await fetch(target.toString(), {
             method: req.method,
             headers: outHeaders,
-            body: req.body, // Pass the body for POST, PUT, etc.
-            redirect: 'manual', // We handle redirects ourselves.
+            body: req.body,
+            redirect: 'manual',
         });
 
         // --- Step 3: Handle the response ---
@@ -67,7 +64,6 @@ module.exports = async (req, res) => {
         if ([301, 302, 307, 308].includes(upstreamResponse.status)) {
             const location = upstreamResponse.headers.get('location');
             if (location) {
-                // Rewrite the redirect URL to point back to our proxy.
                 const newProxyUrl = new URL(req.url, `https://${req.headers.host}`);
                 newProxyUrl.searchParams.set('url', new URL(location, target.href).href);
                 res.setHeader('location', newProxyUrl.toString());
@@ -76,8 +72,15 @@ module.exports = async (req, res) => {
         }
 
         // Capture and store any new cookies from the server.
-        const setCookieHeaders = upstreamResponse.headers.raw()['set-cookie'];
-        if (setCookieHeaders) {
+        // THIS IS THE FIX: We iterate the headers to get cookies instead of using .raw()
+        const setCookieHeaders = [];
+        upstreamResponse.headers.forEach((value, key) => {
+            if (key.toLowerCase() === 'set-cookie') {
+                setCookieHeaders.push(value);
+            }
+        });
+        
+        if (setCookieHeaders.length > 0) {
             setCookieHeaders.forEach(cookieStr => {
                 const [cookiePair] = cookieStr.split(';');
                 const [cookieName] = cookiePair.split('=');
@@ -87,7 +90,6 @@ module.exports = async (req, res) => {
         }
 
         // Copy headers from the server's response to our final response.
-        // **This is where we filter out the bad headers.**
         upstreamResponse.headers.forEach((value, key) => {
             if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
                 res.setHeader(key, value);
@@ -97,8 +99,6 @@ module.exports = async (req, res) => {
         res.status(upstreamResponse.status);
 
         // Stream the response body directly to the client.
-        // Node's fetch automatically decompresses the body, so we are piping the
-        // correct, uncompressed data.
         if (upstreamResponse.body) {
             const bodyStream = Readable.fromWeb(upstreamResponse.body);
             bodyStream.pipe(res);
