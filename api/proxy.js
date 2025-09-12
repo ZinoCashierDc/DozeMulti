@@ -8,57 +8,57 @@ const HOP_BY_HOP_HEADERS = [
 
 export default async function handler(req, res) {
   try {
-    const targetUrl = req.query.url;
-    if (!targetUrl) {
-      return res.status(400).json({ error: "Missing ?url= parameter" });
+    // NEW LOGIC: Determine the target URL from the subdomain
+    const host = req.headers['host']; // e.g., 'www-facebook-com-s123.dozemulti.com'
+    const parts = host.split('.');
+    
+    // This expects a format like "www-facebook-com-s123.yourdomain.com"
+    const subdomain = parts[0]; 
+    const subdomainParts = subdomain.split('-');
+    
+    // The last part is the unique ID, the rest is the URL
+    const uniqueId = subdomainParts.pop();
+    const targetHost = subdomainParts.join('.').replace(/-/g, '.'); // Reconstructs 'www.facebook.com'
+
+    if (!targetHost) {
+      return res.status(400).send("Could not determine target host from subdomain.");
     }
+
+    const targetUrl = `https://${targetHost}${req.url}`; // Append the path, like /login.php
 
     const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
-    // ** NEW: Prepare headers for the fetch request **
-    const fetchHeaders = { 'User-Agent': userAgent };
+    const response = await fetch(targetUrl, {
+      headers: { 'User-Agent': userAgent, 'Cookie': req.headers['cookie'] || '' },
+      redirect: 'manual' // We need to handle redirects to rewrite the domain
+    });
     
-    // ** NEW: Get cookies from the client and add them to the request **
-    const clientCookies = req.headers['x-proxy-cookies'];
-    if (clientCookies) {
-      fetchHeaders['Cookie'] = clientCookies;
+    // Handle redirects manually
+    if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
+        const location = response.headers.get('location');
+        // If redirect is absolute, rewrite it to our subdomain structure
+        const redirectUrl = new URL(location, targetUrl);
+        const newSubdomain = redirectUrl.hostname.replace(/\./g, '-') + '-' + uniqueId;
+        const finalRedirectUrl = `https://${newSubdomain}.yourdomain.com${redirectUrl.pathname}${redirectUrl.search}`;
+        
+        res.setHeader('Location', finalRedirectUrl);
+        res.status(response.status).end();
+        return;
     }
 
-    const response = await fetch(targetUrl, {
-      headers: fetchHeaders,
-      redirect: 'follow'
-    });
-
-    const finalUrl = response.url;
-
-    // ** NEW: Capture the 'set-cookie' headers from Facebook **
-    // Vercel's Edge runtime provides this helper to get all set-cookie headers
-    // Note: For standard Node.js, you might need `response.headers.raw()['set-cookie']`
-    const setCookieHeaders = response.headers.get('set-cookie');
-
-    // Copy and filter headers from Facebook to our response
+    // Copy and filter headers
     response.headers.forEach((value, key) => {
       if (!HOP_BY_HOP_HEADERS.includes(key.toLowerCase())) {
         res.setHeader(key, value);
       }
     });
 
-    // ** NEW: Send the captured cookies back to the client in a custom header **
-    if (setCookieHeaders) {
-      // We send them as a single string, separated by a specific delimiter
-      res.setHeader('x-set-proxy-cookies', setCookieHeaders);
-    }
-    
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    // We also need to expose our custom header to the client-side script
-    res.setHeader("Access-Control-Expose-Headers", "x-set-proxy-cookies");
-
-
     const contentType = response.headers.get('content-type') || '';
     
     if (contentType.includes('text/html')) {
       let body = await response.text();
-      const baseTag = `<base href="${finalUrl}">`;
+      // The base tag is CRITICAL for all assets (CSS, JS) to load correctly
+      const baseTag = `<base href="https://${targetHost}/">`;
       body = body.replace(/<head[^>]*>/i, `$&${baseTag}`);
       res.status(response.status).send(body);
     } else {
@@ -68,6 +68,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("--- PROXY FAILED ---", error);
-    res.status(500).json({ error: "Proxy request failed", details: error.message });
+    res.status(500).send("Proxy request failed: " + error.message);
   }
 }
