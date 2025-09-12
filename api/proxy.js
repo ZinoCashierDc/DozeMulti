@@ -1,117 +1,85 @@
-// api/proxy.js (Node serverless for Vercel)
-// This is the final, single-file solution that manually handles decompression.
-// It is designed specifically to fix the garbled text problem.
-const { Readable } = require('stream');
-const zlib = require('zlib'); // Node.js's built-in decompression library.
-
-// Headers that should NOT be forwarded from the target server back to the client.
-const RESPONSE_HEADERS_TO_STRIP = new Set([
-    'content-encoding',       // CRITICAL: We are decompressing, so this is no longer valid.
-    'content-length',         // The length will change after decompression.
-    'content-security-policy',
-    'x-frame-options',
-    'strict-transport-security',
-    'connection',
-    'keep-alive',
-    'transfer-encoding',
-    'upgrade'
+const cookieJars = new Map();
+const HOP_BY_HOP = new Set([
+  'connection','keep-alive','proxy-authenticate','proxy-authorization',
+  'te','trailers','transfer-encoding','upgrade'
 ]);
 
-// In-memory storage for cookies.
-const cookieJars = new Map();
-
 module.exports = async (req, res) => {
-    try {
-        const urlParam = req.query.url;
-        if (!urlParam) {
-            return res.status(400).send('Error: The "url" query parameter is missing.');
-        }
-
-        const targetUrl = urlParam.includes('://') ? urlParam : `https://` + urlParam;
-        const target = new URL(targetUrl);
-
-        // --- Step 1: Prepare the request to the target server ---
-        const outHeaders = {
-            'host': target.hostname,
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-            // IMPORTANT: Tell the server what compressions we can handle.
-            'accept-encoding': 'gzip, deflate, br'
-        };
-
-        for (const [key, value] of Object.entries(req.headers)) {
-            if (key.toLowerCase() !== 'host') {
-                outHeaders[key] = value;
-            }
-        }
-        
-        const session = req.query.session || 'default';
-        const cookieJar = cookieJars.get(session) || {};
-        const cookieHeader = Object.values(cookieJar).join('; ');
-        if (cookieHeader) {
-            outHeaders['cookie'] = cookieHeader;
-        }
-
-        // --- Step 2: Make the request using Node's built-in fetch ---
-        const upstreamResponse = await fetch(target.toString(), {
-            method: req.method,
-            headers: outHeaders,
-            body: req.body,
-            redirect: 'manual',
-        });
-
-        // --- Step 3: Handle the response headers ---
-
-        // Handle redirects
-        if ([301, 302, 307, 308].includes(upstreamResponse.status)) {
-            const location = upstreamResponse.headers.get('location');
-            if (location) {
-                const newProxyUrl = new URL(req.url, `https://${req.headers.host}`);
-                newProxyUrl.searchParams.set('url', new URL(location, target.href).href);
-                res.setHeader('location', newProxyUrl.toString());
-                return res.status(upstreamResponse.status).send(`Redirecting to: ${location}`);
-            }
-        }
-
-        // Capture and store cookies
-        const setCookieHeaders = [];
-        upstreamResponse.headers.forEach((value, key) => {
-            if (key.toLowerCase() === 'set-cookie') setCookieHeaders.push(value);
-        });
-        if (setCookieHeaders.length > 0) {
-            setCookieHeaders.forEach(cookieStr => {
-                const [cookiePair] = cookieStr.split(';');
-                const [cookieName] = cookiePair.split('=');
-                if (cookieName) cookieJar[cookieName.trim()] = cookiePair.trim();
-            });
-            cookieJars.set(session, cookieJar);
-        }
-
-        // Copy and filter headers for the final response
-        upstreamResponse.headers.forEach((value, key) => {
-            if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
-                res.setHeader(key, value);
-            }
-        });
-        res.status(upstreamResponse.status);
-
-        // --- Step 4: Decompress and stream the response body ---
-        // This is the critical part that fixes the garbled text.
-        const encoding = upstreamResponse.headers.get('content-encoding');
-        const bodyStream = Readable.fromWeb(upstreamResponse.body);
-
-        if (encoding === 'gzip') {
-            bodyStream.pipe(zlib.createGunzip()).pipe(res);
-        } else if (encoding === 'deflate') {
-            bodyStream.pipe(zlib.createInflate()).pipe(res);
-        } else if (encoding === 'br') {
-            bodyStream.pipe(zlib.createBrotliDecompress()).pipe(res);
-        } else {
-            // No compression, just send it through.
-            bodyStream.pipe(res);
-        }
-
-    } catch (err) {
-        console.error('PROXY FATAL ERROR:', err);
-        res.status(500).send(`Proxy Error: ${err.message}`);
+  try {
+    const url = req.query.url || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
+    const session = req.query.session || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) || 'default';
+    if (!url) {
+      res.status(400).send('Missing url parameter');
+      return;
     }
+
+    const target = new URL(url);
+    if (!['http:', 'https:'].includes(target.protocol)) {
+      res.status(400).send('Invalid protocol');
+      return;
+    }
+
+    // build outgoing headers
+    const outHeaders = {};
+    for (const [k, v] of Object.entries(req.headers || {})) {
+      if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+      if (k.toLowerCase() === 'host') continue;
+      outHeaders[k] = v;
+    }
+
+    // force browser-like headers
+    outHeaders['user-agent'] = outHeaders['user-agent'] || 
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
+    outHeaders['accept-language'] = outHeaders['accept-language'] || 'en-US,en;q=0.9';
+    outHeaders['accept-encoding'] = 'gzip, deflate, br';
+
+    // simple cookie jar
+    const jar = cookieJars.get(session) || {};
+    const cookieHeader = Object.values(jar).join('; ');
+    if (cookieHeader) outHeaders['cookie'] = cookieHeader;
+
+    // request body
+    let body = null;
+    if (['POST','PUT','PATCH'].includes(req.method)) {
+      body = req.rawBody || req.body;
+    }
+
+    const fetchOptions = {
+      method: req.method,
+      headers: outHeaders,
+      body: body,
+      redirect: 'follow' // follow redirects instead of blocking them
+    };
+
+    const upstream = await fetch(target.toString(), fetchOptions);
+
+    // capture cookies
+    const setCookies = upstream.headers.get('set-cookie');
+    if (setCookies) {
+      const cur = cookieJars.get(session) || {};
+      setCookies.split(',').forEach(sc => {
+        const pair = sc.split(';')[0].trim();
+        const i = pair.indexOf('=');
+        if (i > -1) {
+          const name = pair.slice(0,i);
+          cur[name] = pair;
+        }
+      });
+      cookieJars.set(session, cur);
+    }
+
+    // copy headers except hop-by-hop
+    upstream.headers.forEach((val, key) => {
+      if (HOP_BY_HOP.has(key.toLowerCase())) return;
+      if (['content-security-policy','x-frame-options'].includes(key.toLowerCase())) return; // strip embedding blockers
+      res.setHeader(key, val);
+    });
+
+    res.status(upstream.status);
+    const arrayBuffer = await upstream.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error('Proxy error', err);
+    res.status(500).send('Proxy error: ' + (err && err.message ? err.message : String(err)));
+  }
 };
