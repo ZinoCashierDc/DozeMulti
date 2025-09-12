@@ -1,15 +1,26 @@
-// api/proxy.js  (Node serverless for Vercel)
 const cookieJars = new Map();
 const HOP_BY_HOP = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailers','transfer-encoding','upgrade']);
 
+// List of response headers to remove or modify for proxying
+const RESPONSE_HEADERS_TO_STRIP = [
+  'content-security-policy',
+  'x-frame-options',
+  'strict-transport-security',
+  'content-encoding', // Let the proxy handle compression
+  'transfer-encoding',
+];
+
 module.exports = async (req, res) => {
   try {
-    const url = req.query.url || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
+    const urlParam = req.query.url || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
     const session = req.query.session || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) || 'default';
-    if (!url) {
+    if (!urlParam) {
       res.status(400).send('Missing url parameter');
       return;
     }
+
+    // Prepend a protocol if missing for convenience
+    const url = urlParam.startsWith('http') ? urlParam : `http://${urlParam}`;
 
     // parse and allow only http/https
     const target = new URL(url);
@@ -22,9 +33,15 @@ module.exports = async (req, res) => {
     const outHeaders = {};
     for (const [k, v] of Object.entries(req.headers || {})) {
       if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+      // Overwrite the host header to match the target
       if (k.toLowerCase() === 'host') continue;
       outHeaders[k] = v;
     }
+    outHeaders['host'] = target.hostname;
+    // Some sites might check the origin or referer
+    outHeaders['origin'] = target.origin;
+    outHeaders['referer'] = target.href;
+
 
     // attach cookies stored for this session
     const jar = cookieJars.get(session) || {};
@@ -35,21 +52,31 @@ module.exports = async (req, res) => {
     let body = null;
     if (['POST','PUT','PATCH'].includes(req.method)) {
       body = req.rawBody || req.body;
-      // express sometimes parse body; ensure Buffer if available
-      if (!body && req.pipe) {
-        // rarely happens in serverless; ignore
-      }
     }
 
     const fetchOptions = {
       method: req.method,
       headers: outHeaders,
       body: body,
-      redirect: 'manual'
+      redirect: 'manual' // We will handle redirects manually
     };
 
     // use global fetch (Node 18+ on Vercel)
     const upstream = await fetch(target.toString(), fetchOptions);
+
+    // Manual redirect handling
+    if ([301, 302, 303, 307, 308].includes(upstream.status)) {
+        const location = upstream.headers.get('location');
+        if (location) {
+            // Reconstruct the proxy URL for the redirect
+            const newProxyUrl = new URL(req.url, `http://${req.headers.host}`);
+            newProxyUrl.searchParams.set('url', new URL(location, target.href).href);
+            res.setHeader('location', newProxyUrl.href);
+            res.status(upstream.status).send(`Redirecting to ${location}`);
+            return;
+        }
+    }
+
 
     // capture set-cookie headers and store in jar
     const setCookies = upstream.headers.raw ? upstream.headers.raw()['set-cookie'] : null;
@@ -66,10 +93,11 @@ module.exports = async (req, res) => {
       cookieJars.set(session, cur);
     }
 
-    // copy response headers, excluding hop-by-hop
+    // copy response headers, excluding hop-by-hop and security headers
     upstream.headers.forEach((val, key) => {
-      if (HOP_BY_HOP.has(key.toLowerCase())) return;
-      // Do not strip security headers here — forward them (some sites need them).
+      const lowerKey = key.toLowerCase();
+      if (HOP_BY_HOP.has(lowerKey)) return;
+      if (RESPONSE_HEADERS_TO_STRIP.includes(lowerKey)) return;
       res.setHeader(key, val);
     });
 
