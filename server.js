@@ -1,30 +1,26 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 const app = express();
 
-// Root check
 app.get('/', (req, res) => {
   res.send('DozeMulti is running 🚀');
 });
 
-// Endpoint: Fetch page HTML
+// Browse endpoint
 app.get('/browse', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send('Missing url');
 
   try {
     const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox','--disable-setuid-sandbox']
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/129.0 Safari/537.36'
-    );
-
     await page.goto(url, { waitUntil: 'networkidle2' });
 
     const html = await page.content();
@@ -37,20 +33,19 @@ app.get('/browse', async (req, res) => {
   }
 });
 
-// Endpoint: Take screenshot
+// Screenshot endpoint
 app.get('/screenshot', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send('Missing url');
 
   try {
     const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox','--disable-setuid-sandbox']
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
-
     await page.goto(url, { waitUntil: 'networkidle2' });
 
     const buffer = await page.screenshot({ fullPage: true });
