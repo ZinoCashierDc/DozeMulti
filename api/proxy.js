@@ -7,21 +7,26 @@ const HOP_BY_HOP_HEADERS = [
 ];
 
 export default async function handler(req, res) {
+  console.log("Proxy function started.");
+
   try {
-    let targetUrl = req.query.url;
+    const targetUrl = req.query.url;
     if (!targetUrl) {
+      console.error("Error: Missing ?url= parameter");
       return res.status(400).json({ error: "Missing ?url= parameter" });
     }
+    
+    console.log(`Target URL: ${targetUrl}`);
 
     const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
     const response = await fetch(targetUrl, {
       headers: { 'User-Agent': userAgent },
-      redirect: 'follow' // Allow fetch to handle redirects automatically
+      redirect: 'follow'
     });
 
-    // After fetch handles redirects, response.url will be the final destination URL
     const finalUrl = response.url;
+    console.log(`Fetched from final URL: ${finalUrl}`);
 
     // Copy and filter headers
     response.headers.forEach((value, key) => {
@@ -32,26 +37,32 @@ export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
 
     const contentType = response.headers.get('content-type') || '';
+    console.log(`Content-Type: ${contentType}`);
     
-    // IMPORTANT: Only modify HTML responses
     if (contentType.includes('text/html')) {
       let body = await response.text();
-
-      // Inject the <base> tag to fix relative URLs
       const baseTag = `<base href="${finalUrl}">`;
-      
-      // Add the base tag right after the <head> tag
       body = body.replace(/<head[^>]*>/i, `$&${baseTag}`);
       
+      console.log("Processed HTML and sending response.");
       res.status(response.status).send(body);
     } else {
-      // For non-HTML content (CSS, JS, images), stream it directly
       const body = await response.arrayBuffer();
+      console.log("Streaming non-HTML content and sending response.");
       res.status(response.status).send(Buffer.from(body));
     }
 
   } catch (error) {
-    console.error("Proxy Error:", error);
-    res.status(500).json({ error: "Proxy request failed", details: error.message });
+    // Log the detailed error on the server
+    console.error("--- PROXY FAILED ---");
+    console.error("Error Message:", error.message);
+    console.error("Error Stack:", error.stack);
+    console.error("--- END OF ERROR ---");
+
+    // Send a generic error response to the client
+    res.status(500).json({ 
+      error: "Proxy request failed", 
+      details: error.message 
+    });
   }
 }
