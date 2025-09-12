@@ -1,4 +1,5 @@
 /* app.js - DozaMulti client-only prototype
+   MODIFIED to use fetch() for loading frames to enable cookie passing via proxy.
    Places iframes for each space and keeps them in DOM to preserve session/state per space.
    Optional PROXY_BASE: set to your serverless proxy base URL (e.g. "/api/proxy?url=" or "https://your-proxy.example/?u=").
 */
@@ -46,10 +47,72 @@ function baseTitleFromUrl(url){
   }
 }
 
-// count same base type number to append #n
 function countSameTitle(baseTitle){
   return spaces.filter(s => (s.baseTitle === baseTitle)).length;
 }
+
+// --- NEW COOKIE HELPER FUNCTIONS ---
+function getSpaceCookies(spaceId) {
+  return localStorage.getItem('space_cookies_' + spaceId) || '';
+}
+
+function setSpaceCookies(spaceId, cookies) {
+  if (cookies) {
+    localStorage.setItem('space_cookies_' + spaceId, cookies);
+  }
+}
+
+// --- NEW: FUNCTION TO LOAD IFRAME CONTENT VIA FETCH ---
+async function loadFrameWithFetch(iframe, space) {
+  if (space.url === 'about:blank') {
+    iframe.src = 'about:blank';
+    notice.style.display = 'none';
+    return;
+  }
+
+  notice.style.display = 'block';
+  notice.textContent = 'Loading space...';
+
+  try {
+    const proxyUrl = PROXY_BASE + encodeURIComponent(space.url);
+    const headers = new Headers();
+    const savedCookies = getSpaceCookies(space.id);
+    if (savedCookies) {
+      headers.append('x-proxy-cookies', savedCookies);
+    }
+
+    const response = await fetch(proxyUrl, { headers: headers });
+
+    // After fetch, get the NEW cookies the proxy captured from Facebook
+    const newCookies = response.headers.get('x-set-proxy-cookies');
+    setSpaceCookies(space.id, newCookies);
+
+    if (!response.ok) {
+        throw new Error(`Proxy returned status ${response.status}`);
+    }
+
+    const html = await response.text();
+
+    // Use a Blob URL to load the content. This is crucial for sandboxing and ensuring the <base> tag works.
+    const blob = new Blob([html], { type: 'text/html' });
+    
+    // Revoke old blob URL if it exists to prevent memory leaks
+    if (iframe.dataset.blobUrl) {
+      URL.revokeObjectURL(iframe.dataset.blobUrl);
+    }
+    
+    const blobUrl = URL.createObjectURL(blob);
+    iframe.dataset.blobUrl = blobUrl; // Store for later cleanup
+    iframe.src = blobUrl;
+    notice.style.display = 'none';
+
+  } catch (error) {
+    console.error('Failed to load frame:', error);
+    notice.style.display = 'block';
+    notice.textContent = 'Content may be blocked or failed to load (X-Frame-Options/CSP). Try "Open" to open in a new tab.';
+  }
+}
+
 
 function createIframeForSpace(s){
   if(frames.has(s.id)) return frames.get(s.id);
@@ -57,28 +120,10 @@ function createIframeForSpace(s){
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
-  // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
   iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-
-  // ✅ Fixed: use s.url instead of site.url
-  iframe.src = PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url;
-
-  // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
   frames.set(s.id, iframe);
-
-  // show/hide notice on load
-  iframe.addEventListener('load', () => {
-    if (iframe.style.display !== 'none') {
-      notice.style.display = 'none';
-    }
-  });
-
-  iframe.addEventListener('error', () => {
-    console.warn('iframe error for', s.url);
-  });
-
   return iframe;
 }
 
@@ -109,6 +154,7 @@ function renderList(){
     el.querySelector('.delBtn').onclick = () => {
       const ifr = frames.get(s.id);
       if (ifr) {
+        if (ifr.dataset.blobUrl) URL.revokeObjectURL(ifr.dataset.blobUrl);
         try { ifr.remove(); } catch(e) {}
         frames.delete(s.id);
       }
@@ -143,7 +189,10 @@ function buildTabs(){
     close.onclick = (ev) => {
       ev.stopPropagation();
       const ifr = frames.get(s.id);
-      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
+      if (ifr) {
+          if (ifr.dataset.blobUrl) URL.revokeObjectURL(ifr.dataset.blobUrl);
+          try { ifr.remove(); } catch(e){} frames.delete(s.id);
+      }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
       save(); renderAll();
@@ -159,51 +208,49 @@ function renderAll(){
   renderList();
   buildTabs();
   if (!activeId && spaces.length) activeId = spaces[0].id;
-  if (activeId) showActiveFrame(activeId);
+  if (activeId) {
+    showActiveFrame(activeId);
+  }
   if (!spaces.length) {
     frameWrap.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
-    framesContainer.innerHTML = '';
     notice.style.display = 'block';
     notice.textContent = 'No spaces — add one with the + button.';
   }
   save();
 }
 
-function activateSpace(id){
+async function activateSpace(id){
   activeId = id;
-  renderAll();
+  // Hide all frames immediately for a snappier UI
+  frames.forEach((f) => { f.style.display = 'none'; });
+  // Re-render tabs to show the active one
+  buildTabs();
+  renderList();
+  await showActiveFrame(id);
+  save();
 }
 
-function showActiveFrame(id){
+// MODIFIED to be async and use the new loading function
+async function showActiveFrame(id){
   const s = spaces.find(x => x.id === id);
   if (!s) {
     notice.style.display = 'block';
     notice.textContent = 'Space not found.';
     return;
   }
-  notice.style.display = 'none';
-
-  let iframe = createIframeForSpace(s);
-
+  
+  const iframe = createIframeForSpace(s);
+  
+  // Hide other frames
   frames.forEach((f, key) => {
-    if (key === id) {
-      f.style.display = 'block';
-    } else {
-      f.style.display = 'none';
-    }
+    f.style.display = (key === id) ? 'block' : 'none';
   });
 
-  let loaded = false;
-  const loadHandler = () => { loaded = true; notice.style.display = 'none'; iframe.removeEventListener('load', loadHandler); };
-  iframe.addEventListener('load', loadHandler);
-  notice.style.display = 'block';
-  notice.textContent = 'Loading space...';
-  setTimeout(() => {
-    if (!loaded) {
-      notice.style.display = 'block';
-      notice.textContent = 'Content may be blocked from embedding (X-Frame-Options/CSP). Try "Open" to open in a new tab.';
-    }
-  }, 4000);
+  // Only load content if the iframe doesn't seem to have content already.
+  // This is a simple check; reloading will force it.
+  if (!iframe.src || iframe.src === 'about:blank') {
+    await loadFrameWithFetch(iframe, s);
+  }
 }
 
 function escapeHtml(text) {
@@ -246,10 +293,8 @@ function addNewSpace(url, title){
   const number = sameCount + 1;
   const s = { id: uid(), url: url, title: title || baseTitle, baseTitle, number };
   spaces.unshift(s);
-  createIframeForSpace(s);
-  activeId = s.id;
-  save();
-  renderAll();
+  createIframeForSpace(s); // Creates the element but does not load it
+  activateSpace(s.id); // activateSpace will handle loading
 }
 
 /* other buttons */
@@ -257,20 +302,17 @@ newBlankBtn.onclick = () => {
   const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
   spaces.unshift(s);
   createIframeForSpace(s);
-  activeId = s.id;
-  save(); renderAll();
+  activateSpace(s.id);
 };
 
 openAllBtn.onclick = () => spaces.forEach(s => window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank'));
 
-reloadFrameBtn.onclick = () => {
+// MODIFIED to be async and use the new loading function
+reloadFrameBtn.onclick = async () => {
   const iframe = frames.get(activeId);
-  if (iframe) {
-    try {
-      iframe.contentWindow.location.reload();
-    } catch(e) {
-      iframe.src = iframe.src;
-    }
+  const space = spaces.find(s => s.id === activeId);
+  if (iframe && space) {
+    await loadFrameWithFetch(iframe, space);
   }
 };
 
