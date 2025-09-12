@@ -1,14 +1,11 @@
-/* app.js - DozeMulti Control Panel
-   This version creates iframes pointing to unique subdomains for true session isolation.
-*/
-
-// !!! IMPORTANT: Set this to your actual custom domain !!!
-const MY_DOMAIN = "dozemulti.com";
+/* app.js - DozaMulti client-only prototype (updated) */
+const PROXY_BASE = "/api/proxy?url="; // or "https://your-vercel-domain.vercel.app/api/proxy?url="
+// If PROXY_BASE is empty it will load direct URLs.
 
 const spaceListEl = document.getElementById('spaceList');
 const tabsEl = document.getElementById('tabs');
-const framesContainer = document.getElementById('framesContainer');
 const frameWrap = document.getElementById('frameWrap');
+const framesContainer = document.getElementById('framesContainer') || frameWrap; // fallback
 const notice = document.getElementById('notice');
 
 const plusBtn = document.getElementById('plusBtn');
@@ -24,50 +21,62 @@ const openAllBtn = document.getElementById('openAllBtn');
 const reloadFrameBtn = document.getElementById('reloadFrame');
 const openFrameBtn = document.getElementById('openFrame');
 
-let spaces = JSON.parse(localStorage.getItem('doza_spaces_v2') || '[]');
-let activeId = localStorage.getItem('doza_active_v2') || null;
-
+let spaces = JSON.parse(localStorage.getItem('doza_spaces') || '[]');
+let activeId = localStorage.getItem('doza_active') || null;
 const frames = new Map();
 
-function save() {
-  localStorage.setItem('doza_spaces_v2', JSON.stringify(spaces));
-  localStorage.setItem('doza_active_v2', activeId || '');
+function save(){
+  localStorage.setItem('doza_spaces', JSON.stringify(spaces));
+  localStorage.setItem('doza_active', activeId || '');
 }
 
-function uid() { return 's_' + Math.random().toString(36).slice(2, 9); }
+function uid(){ return 's_' + Math.random().toString(36).slice(2,9); }
 
-// --- NEW: Generates the unique subdomain for a space ---
-function getSpaceUrl(space) {
-  if (space.url === 'about:blank') return 'about:blank';
-  
+function baseTitleFromUrl(url){
   try {
-    const urlObj = new URL(space.url);
-    // Convert 'www.facebook.com' into 'www-facebook-com'
-    const hostPart = urlObj.hostname.replace(/\./g, '-');
-    const uniqueId = space.id.replace(/_/g, ''); // Use the space's ID for persistence
-    
-    return `https://${hostPart}-${uniqueId}.${MY_DOMAIN}`;
-  } catch (e) {
-    console.error("Invalid URL for space:", space);
-    return 'about:blank';
+    const u = new URL(url);
+    return u.hostname.replace('www.','');
+  } catch(e) {
+    return url;
   }
 }
 
-function createIframeForSpace(s) {
-  if (frames.has(s.id)) return frames.get(s.id);
+function countSameTitle(baseTitle){
+  return spaces.filter(s => (s.baseTitle === baseTitle)).length;
+}
+
+function createIframeForSpace(s){
+  if(frames.has(s.id)) return frames.get(s.id);
 
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
-  // Sandbox is still good practice!
-  iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  iframe.setAttribute(
+    'sandbox',
+    'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox'
+  );
+
+  // build src: use PROXY_BASE if set, and attach session param for cookie separation
+  if (PROXY_BASE && PROXY_BASE.length) {
+    const src = PROXY_BASE + encodeURIComponent(s.url) + `&session=${encodeURIComponent(s.id)}`;
+    iframe.src = src;
+  } else {
+    iframe.src = s.url;
+  }
+
   iframe.style.display = 'none';
-
-  // Set the source to the unique subdomain URL
-  iframe.src = getSpaceUrl(s);
-
   framesContainer.appendChild(iframe);
   frames.set(s.id, iframe);
+
+  iframe.addEventListener('load', () => {
+    // hide notice after load
+    notice.style.display = 'none';
+  });
+
+  iframe.addEventListener('error', () => {
+    console.warn('iframe error for', s.url);
+  });
+
   return iframe;
 }
 
@@ -76,7 +85,7 @@ function renderList(){
   spaces.forEach(s => {
     const el = document.createElement('div');
     el.className = 'space-item';
-    const displayTitle = s.title;
+    const displayTitle = s.title + (s.number ? ` #${s.number}` : '');
     el.innerHTML = `
       <div class="space-thumb" aria-hidden>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 8h18M3 12h18M3 16h18" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -95,16 +104,13 @@ function renderList(){
       </div>
     `;
     el.querySelector('.openBtn').onclick = () => activateSpace(s.id);
-    el.querySelector('.delBtn').onclick = () => {
+    el.querySelector('.delBtn').onclick = (ev) => {
+      ev.stopPropagation();
       const ifr = frames.get(s.id);
-      if (ifr) {
-        try { ifr.remove(); } catch(e) {}
-        frames.delete(s.id);
-      }
+      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
-      save();
-      renderAll();
+      save(); renderAll();
     };
     el.onclick = (e) => {
       if (e.target.closest('.openBtn') || e.target.closest('.delBtn')) return;
@@ -119,7 +125,7 @@ function buildTabs(){
   spaces.forEach(s => {
     const t = document.createElement('div');
     t.className = 'tab' + (s.id === activeId ? ' active' : '');
-    const label = `${s.title}`;
+    const label = `${s.title}${s.number ? ' #' + s.number : ''}`;
     t.innerHTML = `<span>${escapeHtml(label)}</span>`;
     const numSpan = document.createElement('span');
     numSpan.className = 'num';
@@ -151,6 +157,7 @@ function renderAll(){
   if (activeId) showActiveFrame(activeId);
   if (!spaces.length) {
     frameWrap.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
+    framesContainer.innerHTML = '';
     notice.style.display = 'block';
     notice.textContent = 'No spaces — add one with the + button.';
   }
@@ -164,45 +171,52 @@ function activateSpace(id){
 
 function showActiveFrame(id){
   const s = spaces.find(x => x.id === id);
-  if (!s) return;
-
+  if (!s) {
+    notice.style.display = 'block';
+    notice.textContent = 'Space not found.';
+    return;
+  }
   notice.style.display = 'none';
   let iframe = createIframeForSpace(s);
 
   frames.forEach((f, key) => {
-    f.style.display = (key === id) ? 'block' : 'none';
+    f.style.display = (key === id ? 'block' : 'none');
   });
-}
 
+  let loaded = false;
+  const loadHandler = () => { loaded = true; notice.style.display = 'none'; iframe.removeEventListener('load', loadHandler); };
+  iframe.addEventListener('load', loadHandler);
+  notice.style.display = 'block';
+  notice.textContent = 'Loading space...';
+  setTimeout(() => {
+    if (!loaded) {
+      notice.style.display = 'block';
+      notice.textContent = 'Content may be blocked from embedding. Try "Open" to open in a new tab.';
+    }
+  }, 4000);
+}
 
 function escapeHtml(text) {
   if (!text) return '';
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+/* Modal handlers */
+if (plusBtn) plusBtn.onclick = () => addModal.classList.remove('hidden');
+if (closeModal) closeModal.onclick = () => addModal.classList.add('hidden');
+if (addModal) addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.classList.add('hidden'); });
 
-/* Add handlers for modal & adding spaces */
-plusBtn.onclick = () => addModal.classList.remove('hidden');
-closeModal.onclick = () => addModal.classList.add('hidden');
-addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.classList.add('hidden'); });
+if (addFacebook) addFacebook.onclick = () => { addModal.classList.add('hidden'); addNewSpace('https://www.facebook.com', 'Facebook'); };
+if (addFacebookLite) addFacebookLite.onclick = () => { addModal.classList.add('hidden'); addNewSpace('https://mbasic.facebook.com', 'Facebook Lite'); };
 
-addFacebook.onclick = () => {
-  addModal.classList.add('hidden');
-  addNewSpace('https://www.facebook.com', 'Facebook');
-};
-addFacebookLite.onclick = () => {
-  addModal.classList.add('hidden');
-  addNewSpace('https://mbasic.facebook.com', 'Facebook Lite');
-};
-
-addCustom.onclick = () => {
+if (addCustom) addCustom.onclick = () => {
   const raw = urlInput.value.trim();
   if (!raw) return alert('Enter a URL');
   let final = raw;
   if (!/^[a-zA-Z]+:\/\//.test(raw)) final = 'https://' + raw;
   try {
     const parsed = new URL(final);
-    addNewSpace(parsed.href, parsed.hostname.replace('www.',''));
+    addNewSpace(parsed.href, parsed.hostname);
     urlInput.value = '';
     addModal.classList.add('hidden');
   } catch(e) {
@@ -211,27 +225,40 @@ addCustom.onclick = () => {
 };
 
 function addNewSpace(url, title){
-  const s = { id: uid(), url: url, title: title };
+  const baseTitle = baseTitleFromUrl(url);
+  const sameCount = countSameTitle(baseTitle);
+  const number = sameCount + 1;
+  const s = { id: uid(), url: url, title: title || baseTitle, baseTitle, number };
   spaces.unshift(s);
   createIframeForSpace(s);
-  activateSpace(s.id);
+  activeId = s.id;
+  save();
+  renderAll();
 }
 
+/* Other buttons */
+if (newBlankBtn) newBlankBtn.onclick = () => {
+  const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
+  spaces.unshift(s);
+  createIframeForSpace(s);
+  activeId = s.id;
+  save(); renderAll();
+};
 
-/* other buttons */
-reloadFrameBtn.onclick = () => {
+if (openAllBtn) openAllBtn.onclick = () => spaces.forEach(s => window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url) + `&session=${encodeURIComponent(s.id)}`) : s.url, '_blank'));
+
+if (reloadFrameBtn) reloadFrameBtn.onclick = () => {
   const iframe = frames.get(activeId);
   if (iframe) {
-      iframe.src = iframe.src; // Simple way to reload
+    try { iframe.contentWindow.location.reload(); }
+    catch(e) { iframe.src = iframe.src; }
   }
 };
 
-openFrameBtn.onclick = () => {
+if (openFrameBtn) openFrameBtn.onclick = () => {
   const s = spaces.find(x => x.id === activeId);
-  if (s) window.open(getSpaceUrl(s), '_blank', 'noopener');
+  if (s) window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url) + `&session=${encodeURIComponent(s.id)}`) : s.url, '_blank', 'noopener');
 };
 
-/* initial render */
-// Create all iframes on startup
-spaces.forEach(s => createIframeForSpace(s));
+/* Initial render */
 renderAll();
