@@ -1,37 +1,23 @@
 // api/proxy.js
-
 export default async function handler(req, res) {
   try {
-    const targetUrl = req.query.url;
-    if (!targetUrl) {
-      return res.status(400).send("Missing ?url=");
-    }
+    const { url } = req.query;
+    if (!url) return res.status(400).send("Missing url");
 
-    if (targetUrl.startsWith("file:") || targetUrl.includes("localhost")) {
-      return res.status(400).send("Invalid URL");
-    }
+    const target = decodeURIComponent(url);
 
-    const response = await fetch(targetUrl, {
+    const r = await fetch(target, {
       headers: {
-        "user-agent":
-          req.headers["user-agent"] ||
-          "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        "upgrade-insecure-requests": "1",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-user": "?1",
-        "sec-fetch-dest": "document"
-      }
+        "User-Agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) " +
+          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15A372 Safari/604.1",
+      },
     });
 
-    const contentType = response.headers.get("content-type");
-    if (contentType) res.setHeader("Content-Type", contentType);
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    res.send(buffer);
+    const body = await r.text();
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(body);
   } catch (err) {
-    console.error("Proxy error:", err);
-    res.status(500).send("Proxy failed: " + err.message);
+    res.status(500).send("Proxy error: " + err.message);
   }
 }
