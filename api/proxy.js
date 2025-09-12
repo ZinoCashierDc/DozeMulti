@@ -1,109 +1,113 @@
 // api/proxy.js (Node serverless for Vercel)
+// This is a single-file solution with NO external dependencies.
 const { Readable } = require('stream');
 
-const cookieJars = new Map();
-const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade']);
+// A Set of headers that should NOT be forwarded from the target server back to the client.
+// This is the key to fixing the "rubbish" output and security issues.
+const RESPONSE_HEADERS_TO_STRIP = new Set([
+    'content-encoding',       // CRITICAL: This fixes the garbled/rubbish text issue.
+    'content-length',         // The length changes after decompression, so this must be removed.
+    'content-security-policy',// Prevents the site from loading inside the proxy.
+    'x-frame-options',        // Also prevents the site from being embedded.
+    'strict-transport-security', // Can cause HTTPS issues in the proxy.
+    'connection',             // Hop-by-hop header.
+    'keep-alive',             // Hop-by-hop header.
+    'transfer-encoding',      // Hop-by-hop header.
+    'upgrade'                 // Hop-by-hop header.
+]);
 
-// Headers to remove from the upstream response before sending to the client
-const RESPONSE_HEADERS_TO_STRIP = [
-    'content-security-policy',
-    'x-frame-options',
-    'strict-transport-security',
-    'content-encoding', // We let fetch decompress and we send uncompressed
-    'transfer-encoding',
-];
+// In-memory storage for cookies to handle user logins and sessions.
+const cookieJars = new Map();
 
 module.exports = async (req, res) => {
     try {
-        const urlParam = req.query.url || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
-        const session = req.query.session || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) || 'default';
-
+        const urlParam = req.query.url;
         if (!urlParam) {
-            return res.status(400).send('Missing url parameter');
+            return res.status(400).send('Error: The "url" query parameter is missing.');
         }
 
-        // Prepend a protocol if one is not present
-        const url = urlParam.includes('://') ? urlParam : `https://` + urlParam;
+        // Add "https://" by default if no protocol is specified.
+        const targetUrl = urlParam.includes('://') ? urlParam : `https://` + urlParam;
+        const target = new URL(targetUrl);
 
-        const target = new URL(url);
-        if (!['http:', 'https:'].includes(target.protocol)) {
-            return res.status(400).send('Invalid protocol');
-        }
+        // --- Step 1: Prepare the request to the target server ---
+        const outHeaders = {
+            // Set the 'Host' header to the target's hostname. This is ESSENTIAL.
+            'host': target.hostname,
+            // Use a standard browser User-Agent to avoid being blocked.
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        };
 
-        // Build outgoing request headers
-        const outHeaders = {};
-        for (const [k, v] of Object.entries(req.headers)) {
-            if (!HOP_BY_HOP.has(k.toLowerCase()) && k.toLowerCase() !== 'host') {
-                outHeaders[k] = v;
+        // Copy most headers from the client's request.
+        for (const [key, value] of Object.entries(req.headers)) {
+            if (key.toLowerCase() !== 'host') { // The 'host' header is already set.
+                outHeaders[key] = value;
             }
         }
-        // Set essential headers to mimic a real browser request
-        outHeaders['host'] = target.hostname;
-        outHeaders['origin'] = target.origin;
-        outHeaders['referer'] = target.href;
-        outHeaders['user-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
-
-        // Attach cookies for the session
-        const jar = cookieJars.get(session) || {};
-        const cookieHeader = Object.values(jar).join('; ');
+        
+        // Add stored cookies for this session to the request.
+        const session = req.query.session || 'default';
+        const cookieJar = cookieJars.get(session) || {};
+        const cookieHeader = Object.values(cookieJar).join('; ');
         if (cookieHeader) {
             outHeaders['cookie'] = cookieHeader;
         }
 
-        const fetchOptions = {
+        // --- Step 2: Make the request using Node's built-in fetch ---
+        const upstreamResponse = await fetch(target.toString(), {
             method: req.method,
             headers: outHeaders,
-            body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? req.body : null,
-            redirect: 'manual', // We handle redirects to rewrite the proxy URL
-        };
+            body: req.body, // Pass the body for POST, PUT, etc.
+            redirect: 'manual', // We handle redirects ourselves.
+        });
 
-        const upstream = await fetch(target.toString(), fetchOptions);
+        // --- Step 3: Handle the response ---
 
-        // Handle redirects manually
-        if ([301, 302, 303, 307, 308].includes(upstream.status)) {
-            const location = upstream.headers.get('location');
+        // Handle redirects (e.g., HTTP 301, 302).
+        if ([301, 302, 307, 308].includes(upstreamResponse.status)) {
+            const location = upstreamResponse.headers.get('location');
             if (location) {
-                const newProxyUrl = new URL(req.url, `http://${req.headers.host}`);
+                // Rewrite the redirect URL to point back to our proxy.
+                const newProxyUrl = new URL(req.url, `https://${req.headers.host}`);
                 newProxyUrl.searchParams.set('url', new URL(location, target.href).href);
-                res.setHeader('location', newProxyUrl.href);
-                return res.status(upstream.status).send(`Redirecting to ${location}`);
+                res.setHeader('location', newProxyUrl.toString());
+                return res.status(upstreamResponse.status).send(`Redirecting to: ${location}`);
             }
         }
 
-        // Capture and store cookies from the response
-        const rawCookies = upstream.headers.raw ? upstream.headers.raw()['set-cookie'] : [];
-        if (rawCookies.length > 0) {
-            const cur = cookieJars.get(session) || {};
-            rawCookies.forEach(sc => {
-                const pair = sc.split(';')[0].trim();
-                const i = pair.indexOf('=');
-                if (i > -1) cur[pair.slice(0, i)] = pair;
+        // Capture and store any new cookies from the server.
+        const setCookieHeaders = upstreamResponse.headers.raw()['set-cookie'];
+        if (setCookieHeaders) {
+            setCookieHeaders.forEach(cookieStr => {
+                const [cookiePair] = cookieStr.split(';');
+                const [cookieName] = cookiePair.split('=');
+                if (cookieName) cookieJar[cookieName.trim()] = cookiePair.trim();
             });
-            cookieJars.set(session, cur);
-            // Forward the Set-Cookie headers to the client
-            res.setHeader('set-cookie', rawCookies);
+            cookieJars.set(session, cookieJar);
         }
 
-        // Copy response headers, filtering out problematic ones
-        upstream.headers.forEach((val, key) => {
-            const lowerKey = key.toLowerCase();
-            if (!HOP_BY_HOP.has(lowerKey) && !RESPONSE_HEADERS_TO_STRIP.includes(lowerKey)) {
-                res.setHeader(key, val);
+        // Copy headers from the server's response to our final response.
+        // **This is where we filter out the bad headers.**
+        upstreamResponse.headers.forEach((value, key) => {
+            if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
+                res.setHeader(key, value);
             }
         });
-        
-        res.status(upstream.status);
 
-        // Stream the response body directly to the client
-        if (upstream.body) {
-            const bodyStream = Readable.fromWeb(upstream.body);
+        res.status(upstreamResponse.status);
+
+        // Stream the response body directly to the client.
+        // Node's fetch automatically decompresses the body, so we are piping the
+        // correct, uncompressed data.
+        if (upstreamResponse.body) {
+            const bodyStream = Readable.fromWeb(upstreamResponse.body);
             bodyStream.pipe(res);
         } else {
             res.end();
         }
 
     } catch (err) {
-        console.error('Proxy error', err);
-        res.status(500).send('Proxy error: ' + (err.message || String(err)));
+        console.error('PROXY FATAL ERROR:', err);
+        res.status(500).send(`Proxy Error: ${err.message}`);
     }
 };
