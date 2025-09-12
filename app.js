@@ -1,4 +1,7 @@
-/* app.js - DozaMulti client-only prototype */
+/* app.js - DozaMulti client-only prototype
+   Places iframes for each space and keeps them in DOM to preserve session/state per space.
+   Optional PROXY_BASE: set to your serverless proxy base URL (e.g. "/api/proxy?url=" or "https://your-proxy.example/?u=").
+*/
 const PROXY_BASE = "/api/proxy?url=";
 // If PROXY_BASE is empty it will load direct URLs.
 
@@ -23,6 +26,8 @@ const openFrameBtn = document.getElementById('openFrame');
 
 let spaces = JSON.parse(localStorage.getItem('doza_spaces') || '[]');
 let activeId = localStorage.getItem('doza_active') || null;
+
+// Keep a map of iframe elements
 const frames = new Map();
 
 function save(){
@@ -41,6 +46,7 @@ function baseTitleFromUrl(url){
   }
 }
 
+// count same base type number to append #n
 function countSameTitle(baseTitle){
   return spaces.filter(s => (s.baseTitle === baseTitle)).length;
 }
@@ -51,21 +57,26 @@ function createIframeForSpace(s){
   const iframe = document.createElement('iframe');
   iframe.className = 'frame';
   iframe.id = 'frame_' + s.id;
-  iframe.setAttribute(
-    'sandbox',
-    'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox'
-  );
+  // sandbox attribute keeps iframe isolated but allow-same-origin may be required for some sites (may be blocked by site)
+  iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox');
 
-  iframe.src = PROXY_BASE + encodeURIComponent(s.url);
+  // ✅ Fixed: use s.url instead of site.url
+  iframe.src = PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url;
 
+  // Loading UI
   iframe.style.display = 'none';
   framesContainer.appendChild(iframe);
   frames.set(s.id, iframe);
 
+  // show/hide notice on load
   iframe.addEventListener('load', () => {
     if (iframe.style.display !== 'none') {
       notice.style.display = 'none';
     }
+  });
+
+  iframe.addEventListener('error', () => {
+    console.warn('iframe error for', s.url);
   });
 
   return iframe;
@@ -97,10 +108,14 @@ function renderList(){
     el.querySelector('.openBtn').onclick = () => activateSpace(s.id);
     el.querySelector('.delBtn').onclick = () => {
       const ifr = frames.get(s.id);
-      if (ifr) { try { ifr.remove(); } catch(e){} frames.delete(s.id); }
+      if (ifr) {
+        try { ifr.remove(); } catch(e) {}
+        frames.delete(s.id);
+      }
       spaces = spaces.filter(x => x.id !== s.id);
       if (activeId === s.id) activeId = spaces.length ? spaces[0].id : null;
-      save(); renderAll();
+      save();
+      renderAll();
     };
     el.onclick = (e) => {
       if (e.target.closest('.openBtn') || e.target.closest('.delBtn')) return;
@@ -171,7 +186,11 @@ function showActiveFrame(id){
   let iframe = createIframeForSpace(s);
 
   frames.forEach((f, key) => {
-    f.style.display = (key === id ? 'block' : 'none');
+    if (key === id) {
+      f.style.display = 'block';
+    } else {
+      f.style.display = 'none';
+    }
   });
 
   let loaded = false;
@@ -182,7 +201,7 @@ function showActiveFrame(id){
   setTimeout(() => {
     if (!loaded) {
       notice.style.display = 'block';
-      notice.textContent = 'Content may be blocked from embedding. Try "Open" to open in a new tab.';
+      notice.textContent = 'Content may be blocked from embedding (X-Frame-Options/CSP). Try "Open" to open in a new tab.';
     }
   }, 4000);
 }
@@ -192,14 +211,14 @@ function escapeHtml(text) {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* Modal handlers */
+/* Add handlers for modal & adding spaces */
 plusBtn.onclick = () => addModal.classList.remove('hidden');
 closeModal.onclick = () => addModal.classList.add('hidden');
 addModal.addEventListener('click', (e) => { if (e.target === addModal) addModal.classList.add('hidden'); });
 
 addFacebook.onclick = () => {
   addModal.classList.add('hidden');
-  addNewSpace('https://mbasic.facebook.com', 'Facebook');
+  addNewSpace('https://www.facebook.com', 'Facebook');
 };
 addFacebookLite.onclick = () => {
   addModal.classList.add('hidden');
@@ -233,7 +252,7 @@ function addNewSpace(url, title){
   renderAll();
 }
 
-/* Other buttons */
+/* other buttons */
 newBlankBtn.onclick = () => {
   const s = { id: uid(), url: 'about:blank', title: 'Blank', baseTitle: 'blank', number: 1 };
   spaces.unshift(s);
@@ -247,8 +266,11 @@ openAllBtn.onclick = () => spaces.forEach(s => window.open(PROXY_BASE ? (PROXY_B
 reloadFrameBtn.onclick = () => {
   const iframe = frames.get(activeId);
   if (iframe) {
-    try { iframe.contentWindow.location.reload(); }
-    catch(e) { iframe.src = iframe.src; }
+    try {
+      iframe.contentWindow.location.reload();
+    } catch(e) {
+      iframe.src = iframe.src;
+    }
   }
 };
 
@@ -257,5 +279,5 @@ openFrameBtn.onclick = () => {
   if (s) window.open(PROXY_BASE ? (PROXY_BASE + encodeURIComponent(s.url)) : s.url, '_blank', 'noopener');
 };
 
-/* Initial render */
+/* initial render */
 renderAll();
