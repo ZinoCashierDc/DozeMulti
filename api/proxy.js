@@ -1,101 +1,54 @@
-// /api/proxy.js
-const cookieJars = new Map();
-const HOP_BY_HOP = new Set([
-  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
-  'te', 'trailers', 'transfer-encoding', 'upgrade'
-]);
+// Import necessary modules
+const express = require('express');
+const fetch = require('node-fetch');
 
-module.exports = async (req, res) => {
+const app = express();
+
+// Enable CORS if needed (optional)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  next();
+});
+
+// Proxy endpoint
+app.get('/api/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+
+  // Validate the presence of the 'url' parameter
+  if (!targetUrl) {
+    return res.status(400).json({ error: 'Missing "url" query parameter.' });
+  }
+
+  // Validate the URL format (optional but recommended)
   try {
-    const url =
-      req.query.url ||
-      (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
-    const session =
-      req.query.session ||
-      (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) ||
-      'default';
+    new URL(targetUrl);
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid URL format.' });
+  }
 
-    if (!url) {
-      res.status(400).send('Missing url parameter');
-      return;
-    }
+  try {
+    // Fetch the target URL
+    const response = await fetch(targetUrl);
 
-    const target = new URL(url);
-    if (!['http:', 'https:'].includes(target.protocol)) {
-      res.status(400).send('Invalid protocol');
-      return;
-    }
-
-    // Build outgoing headers
-    const outHeaders = {
-      'user-agent':
-        req.headers['user-agent'] ||
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/129.0 Safari/537.36',
-      'accept-language': req.headers['accept-language'] || 'en-US,en;q=0.9',
-    };
-
-    for (const [k, v] of Object.entries(req.headers || {})) {
-      if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-      if (['host', 'user-agent', 'accept-language'].includes(k.toLowerCase())) continue;
-      outHeaders[k] = v;
-    }
-
-    // Attach cookies for this session
-    const jar = cookieJars.get(session) || {};
-    const cookieHeader = Object.values(jar).join('; ');
-    if (cookieHeader) outHeaders['cookie'] = cookieHeader;
-
-    // Request body
-    let body = null;
-    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-      body = req.rawBody || req.body; // Ensure your server populates req.rawBody
-    }
-
-    const fetchOptions = {
-      method: req.method,
-      headers: outHeaders,
-      body: body,
-      redirect: 'follow', // Automatically follow redirects
-    };
-
-    const upstream = await fetch(target.toString(), fetchOptions);
-
-    // Save cookies from response
-    const setCookieHeaders = upstream.headers.get('set-cookie');
-    if (setCookieHeaders) {
-      const cur = cookieJars.get(session) || {};
-      const cookies = Array.isArray(setCookieHeaders)
-        ? setCookieHeaders
-        : setCookieHeaders.split(',');
-      cookies.forEach(sc => {
-        const pair = sc.split(';')[0].trim();
-        const i = pair.indexOf('=');
-        if (i > -1) {
-          const name = pair.slice(0, i);
-          cur[name] = pair;
-        }
-      });
-      cookieJars.set(session, cur);
-    }
-
-    // Forward upstream headers
-    upstream.headers.forEach((val, key) => {
-      if (HOP_BY_HOP.has(key.toLowerCase())) return;
-      res.setHeader(key, val);
+    // Forward status code and headers
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      // Exclude some headers if needed (like 'transfer-encoding')
+      if (key.toLowerCase() !== 'transfer-encoding') {
+        res.setHeader(key, value);
+      }
     });
 
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-
-    // Send response with status code
-    res.status(upstream.status);
-    const arrayBuffer = await upstream.arrayBuffer();
-    res.send(Buffer.from(arrayBuffer));
-
-  } catch (err) {
-    console.error('Proxy error', err);
-    res.status(500).send('Proxy error: ' + (err && err.message ? err.message : String(err)));
+    // Stream the response body to the client
+    response.body.pipe(res);
+  } catch (error) {
+    console.error('Error fetching target URL:', error);
+    res.status(500).json({ error: 'Error fetching the target URL.' });
   }
-};
+});
+
+// Start the server (if running locally)
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Proxy server running on port ${PORT}`);
+});
