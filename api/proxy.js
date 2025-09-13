@@ -1,21 +1,12 @@
 // /api/proxy.js
 const cookieJars = new Map();
 const HOP_BY_HOP = new Set([
-  'connection','keep-alive','proxy-authenticate','proxy-authorization',
-  'te','trailers','transfer-encoding','upgrade'
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailers', 'transfer-encoding', 'upgrade'
 ]);
 
 module.exports = async (req, res) => {
   try {
-    // allow preflight CORS
-    if (req.method === 'OPTIONS') {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.status(204).end();
-      return;
-    }
-
     const url =
       req.query.url ||
       (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
@@ -35,47 +26,49 @@ module.exports = async (req, res) => {
       return;
     }
 
-    // build outgoing headers
+    // Build outgoing headers
     const outHeaders = {
       'user-agent':
         req.headers['user-agent'] ||
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
         '(KHTML, like Gecko) Chrome/129.0 Safari/537.36',
       'accept-language': req.headers['accept-language'] || 'en-US,en;q=0.9',
-      'accept-encoding': 'gzip, deflate, br', // support compression
     };
 
     for (const [k, v] of Object.entries(req.headers || {})) {
       if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-      if (['host','user-agent','accept-language','accept-encoding'].includes(k.toLowerCase())) continue;
+      if (['host', 'user-agent', 'accept-language'].includes(k.toLowerCase())) continue;
       outHeaders[k] = v;
     }
 
-    // attach cookies for this session
+    // Attach cookies for this session
     const jar = cookieJars.get(session) || {};
     const cookieHeader = Object.values(jar).join('; ');
     if (cookieHeader) outHeaders['cookie'] = cookieHeader;
 
-    // request body
+    // Request body
     let body = null;
-    if (['POST','PUT','PATCH','DELETE'].includes(req.method)) {
-      body = req.rawBody || req.body;
+    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      body = req.rawBody || req.body; // Ensure your server populates req.rawBody
     }
 
     const fetchOptions = {
       method: req.method,
       headers: outHeaders,
       body: body,
-      redirect: 'follow', // follow redirects properly
+      redirect: 'follow', // Automatically follow redirects
     };
 
     const upstream = await fetch(target.toString(), fetchOptions);
 
-    // save cookies (handle multiple Set-Cookie headers correctly)
-    const setCookies = upstream.headers.raw()['set-cookie'];
-    if (setCookies) {
+    // Save cookies from response
+    const setCookieHeaders = upstream.headers.get('set-cookie');
+    if (setCookieHeaders) {
       const cur = cookieJars.get(session) || {};
-      setCookies.forEach(sc => {
+      const cookies = Array.isArray(setCookieHeaders)
+        ? setCookieHeaders
+        : setCookieHeaders.split(',');
+      cookies.forEach(sc => {
         const pair = sc.split(';')[0].trim();
         const i = pair.indexOf('=');
         if (i > -1) {
@@ -86,18 +79,17 @@ module.exports = async (req, res) => {
       cookieJars.set(session, cur);
     }
 
-    // forward headers
+    // Forward upstream headers
     upstream.headers.forEach((val, key) => {
       if (HOP_BY_HOP.has(key.toLowerCase())) return;
       res.setHeader(key, val);
     });
 
-    // important: CORS headers
+    // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Expose-Headers', '*');
 
-    // send status + body
+    // Send response with status code
     res.status(upstream.status);
     const arrayBuffer = await upstream.arrayBuffer();
     res.send(Buffer.from(arrayBuffer));
