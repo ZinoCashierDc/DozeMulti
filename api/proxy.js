@@ -76,52 +76,29 @@ module.exports = async (req, res) => {
       cookieJars.set(session, cur);
     }
 
-    // Forward headers, but REMOVE frame-blocking headers
+    // Forward headers, but REMOVE frame-blocking and proxy-identifying headers
     let contentType = upstream.headers.get('content-type') || '';
     upstream.headers.forEach((val, key) => {
       const lowerKey = key.toLowerCase();
       if (HOP_BY_HOP.has(lowerKey)) return;
-      if (['x-frame-options', 'content-security-policy', 'frame-options'].includes(lowerKey)) return;
+      if (['x-frame-options', 'content-security-policy', 'frame-options', 'x-content-type-options', 'x-xss-protection', 'x-powered-by', 'server'].includes(lowerKey)) return;
       res.setHeader(key, val);
     });
 
+    // Set permissive CORS and CSP headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
 
-    // If HTML, inject anti-framebust script
+    // Proxy response
     if (contentType.includes('text/html')) {
       let html = await upstream.text();
-      html = html.replace(
-        /<head[^>]*>/i,
-        match =>
-          match +
-          `<script>
-            try {
-              Object.defineProperty(window, 'top', {get: () => window});
-              Object.defineProperty(window, 'parent', {get: () => window});
-              window.frameElement = true;
-              window.self = window;
-              window.top = window;
-              window.parent = window;
-            } catch(e){}
-            window.addEventListener('DOMContentLoaded', function() {
-              // Remove framebusting scripts
-              document.querySelectorAll('script').forEach(s => {
-                if (s.textContent.match(/top\\.location|window\\.top|parent\\.location|window\\.parent/)) {
-                  s.remove();
-                }
-              });
-            });
-          </script>`
-      );
       res.status(upstream.status);
       res.send(html);
       return;
     }
 
-    // Otherwise, just proxy as buffer
     res.status(upstream.status);
     const arrayBuffer = await upstream.arrayBuffer();
     res.send(Buffer.from(arrayBuffer));
