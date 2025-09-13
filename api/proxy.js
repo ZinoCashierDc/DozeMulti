@@ -1,15 +1,13 @@
 // /api/proxy.js
-import fetch from 'node-fetch';
-
 const cookieJars = new Map();
 const HOP_BY_HOP = new Set([
   'connection','keep-alive','proxy-authenticate','proxy-authorization',
   'te','trailers','transfer-encoding','upgrade'
 ]);
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
   try {
-    const urlParam =
+    const url =
       req.query.url ||
       (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('url'));
     const session =
@@ -17,12 +15,12 @@ export default async (req, res) => {
       (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('session')) ||
       'default';
 
-    if (!urlParam) {
+    if (!url) {
       res.status(400).send('Missing url parameter');
       return;
     }
 
-    const target = new URL(urlParam);
+    const target = new URL(url);
     if (!['http:', 'https:'].includes(target.protocol)) {
       res.status(400).send('Invalid protocol');
       return;
@@ -48,21 +46,10 @@ export default async (req, res) => {
     const cookieHeader = Object.values(jar).join('; ');
     if (cookieHeader) outHeaders['cookie'] = cookieHeader;
 
-    // Request body handling
+    // Request body
     let body = null;
     if (['POST','PUT','PATCH'].includes(req.method)) {
-      // Use req.read() or req.body depending on environment
-      if (req.body) {
-        body = req.body;
-      } else {
-        // fallback: read raw body (Vercel streams request body)
-        body = await new Promise((resolve, reject) => {
-          const chunks = [];
-          req.on('data', chunk => chunks.push(chunk));
-          req.on('end', () => resolve(Buffer.concat(chunks)));
-          req.on('error', reject);
-        });
-      }
+      body = req.rawBody || req.body;
     }
 
     const fetchOptions = {
@@ -75,37 +62,44 @@ export default async (req, res) => {
     const upstream = await fetch(target.toString(), fetchOptions);
 
     // Save cookies
-    const setCookieHeaders = upstream.headers.raw()['set-cookie'];
+    const setCookieHeaders = upstream.headers.get('set-cookie');
     if (setCookieHeaders) {
-      // set-cookie headers are an array of strings
       const cur = cookieJars.get(session) || {};
-      setCookieHeaders.forEach(sc => {
-        const parts = sc.split(';');
-        const [name, value] = parts[0].split('=');
-        if (name && value) {
-          cur[name.trim()] = `${name}=${value}`;
+      setCookieHeaders.split(',').forEach(sc => {
+        const pair = sc.split(';')[0].trim();
+        const i = pair.indexOf('=');
+        if (i > -1) {
+          const name = pair.slice(0,i);
+          cur[name] = pair;
         }
       });
       cookieJars.set(session, cur);
     }
 
-    // Forward headers
+    // Forward headers, but REMOVE frame-blocking headers
     upstream.headers.forEach((val, key) => {
-      if (HOP_BY_HOP.has(key.toLowerCase())) return;
+      const lowerKey = key.toLowerCase();
+      if (HOP_BY_HOP.has(lowerKey)) return;
+      // Remove headers that block iframe embedding
+      if (['x-frame-options', 'content-security-policy', 'frame-options'].includes(lowerKey)) return;
       res.setHeader(key, val);
     });
 
-    // CORS headers
+    // Set CORS headers for broadest compatibility
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
 
-    // Send response
+    // Optionally, you can try to "relax" CSP by replacing it
+    res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
+
+    // Send status + body
     res.status(upstream.status);
-    const buffer = await upstream.buffer();
-    res.send(buffer);
+    const arrayBuffer = await upstream.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
 
   } catch (err) {
-    console.error('Proxy error:', err);
+    console.error('Proxy error', err);
     res.status(500).send('Proxy error: ' + (err && err.message ? err.message : String(err)));
   }
 };
