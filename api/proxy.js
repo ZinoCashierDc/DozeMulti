@@ -8,7 +8,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(targetUrl, {
+    // Build fetch options
+    const options = {
       method: req.method,
       headers: {
         ...req.headers,
@@ -17,19 +18,26 @@ export default async function handler(req, res) {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
       },
-      body: ["GET", "HEAD"].includes(req.method) ? undefined : req.body,
-    });
+    };
 
-    // copy headers
+    // Add body if not GET/HEAD
+    if (!["GET", "HEAD"].includes(req.method)) {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      options.body = Buffer.concat(chunks);
+    }
+
+    // Fetch target
+    const response = await fetch(targetUrl, options);
+
+    // Copy headers, strip blocking
     response.headers.forEach((value, key) => {
       if (
         ["content-security-policy", "x-frame-options"].includes(key.toLowerCase())
-      ) {
-        return; // strip CSP + frame protections
-      }
+      )
+        return;
       res.setHeader(key, value);
     });
-
     res.removeHeader("content-security-policy");
     res.removeHeader("x-frame-options");
 
@@ -37,7 +45,7 @@ export default async function handler(req, res) {
     if (response.headers.get("content-type")?.includes("text/html")) {
       let text = await response.text();
 
-      // Strip frame-blocking meta
+      // Strip meta tags
       text = text.replace(
         /<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi,
         ""
@@ -47,14 +55,13 @@ export default async function handler(req, res) {
         ""
       );
 
-      // Rewrite relative links to go back through proxy
+      // Rewrite links (important for Facebook assets)
       text = text.replace(
         /(href|src)=["']([^"']+)["']/gi,
         (match, attr, url) => {
           if (url.startsWith("http")) {
             return `${attr}="/api/proxy?url=${encodeURIComponent(url)}"`;
           }
-          // relative URL → join with target host
           const absolute = new URL(url, targetUrl).href;
           return `${attr}="/api/proxy?url=${encodeURIComponent(absolute)}"`;
         }
@@ -63,9 +70,9 @@ export default async function handler(req, res) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(200).send(text);
     } else {
-      // Non-HTML → stream directly
-      res.status(response.status);
-      response.body.pipe(res);
+      // Non-HTML: just forward as buffer
+      const buf = Buffer.from(await response.arrayBuffer());
+      res.status(response.status).send(buf);
     }
   } catch (err) {
     console.error("Proxy error:", err);
